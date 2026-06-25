@@ -66,6 +66,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
   const [defenseState, setDefenseState] = useState(String(securityActor.getSnapshot().value));
   const openErrors = data.errors.filter((error) => error.status === 'open').length;
   const canManageUsers = Boolean(profile?.role === 'owner' || profile?.permissions.includes('users:write'));
+  const bridgeReady = Boolean(data.status.online && data.status.heartbeatFresh);
 
   useEffect(() => {
     const subscription = securityActor.subscribe((snapshot) => setDefenseState(String(snapshot.value)));
@@ -135,15 +136,21 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
       return;
     }
 
+    if (!bridgeReady) {
+      setMessage('Bot bridge is offline or stale. Start the Node server before sending admin invites.');
+      return;
+    }
+
     try {
+      const email = inviteEmail.trim().toLowerCase();
       await inviteAdminUser({
-        email: inviteEmail,
+        email,
         role: inviteRole,
         permissions: inviteRole === 'owner' ? ['config:write', 'actions:write', 'users:write', 'security:write'] : invitePermissions,
         redirectTo: window.location.origin + window.location.pathname,
       });
       setInviteEmail('');
-      setMessage(`Invite queued for ${inviteEmail.trim().toLowerCase()}.`);
+      setMessage(`Invite queued for ${email}. Check Actions for the sent or failed result.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Invite failed.');
     }
@@ -273,6 +280,11 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                     Invite Admin
                   </div>
                   <div className="mt-3 grid gap-3">
+                    {!bridgeReady ? (
+                      <div className="rounded-md border border-yellow-300/25 bg-yellow-400/10 px-3 py-2 text-xs text-yellow-100">
+                        The bot bridge is not reporting. Start the Node server before sending account invitations.
+                      </div>
+                    ) : null}
                     <Input type="email" value={inviteEmail} placeholder="operator@fracturemc.com" onChange={(event) => setInviteEmail(event.target.value)} />
                     <select
                       className="h-9 rounded-md border border-input bg-black/20 px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
@@ -296,12 +308,12 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                         </label>
                       ))}
                     </div>
-                    <Button onClick={() => void sendAdminInvite()} disabled={!canManageUsers || !inviteEmail.includes('@')}>
+                    <Button onClick={() => void sendAdminInvite()} disabled={!canManageUsers || !bridgeReady || !inviteEmail.includes('@')}>
                       <MailPlus size={16} />
-                      Queue invite
+                      {bridgeReady ? 'Queue invite' : 'Bridge offline'}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      Invites are sent by the running bot bridge so the service-role key never reaches the browser.
+                      Invites are sent by the running bot bridge. If Supabase email is rate-limited, the action will fail with the provider message in Actions.
                     </p>
                   </div>
                 </section>

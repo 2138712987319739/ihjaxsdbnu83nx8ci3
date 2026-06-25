@@ -33,6 +33,7 @@ export const sampleDashboardData: DashboardData = {
   config: defaultConfig,
   status: {
     online: false,
+    heartbeatFresh: false,
     currentPlayers: 0,
     totalJoins: 0,
     targetHost: defaultConfig.targetHost,

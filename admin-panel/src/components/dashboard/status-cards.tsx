@@ -8,7 +8,7 @@ export function StatusCards({ data }: { data: DashboardData }) {
     {
       label: 'Current players',
       value: formatNumber(data.status.currentPlayers),
-      hint: data.status.online ? 'Portal session active' : 'Awaiting bot heartbeat',
+      hint: data.status.online ? 'Portal session active' : 'Awaiting fresh bot heartbeat',
       icon: Users,
       accent: 'text-blue-200',
     },
@@ -29,7 +29,7 @@ export function StatusCards({ data }: { data: DashboardData }) {
     {
       label: 'Heartbeat',
       value: formatDate(data.status.lastHeartbeat),
-      hint: data.status.online ? 'Bridge reporting' : 'No recent signal',
+      hint: data.status.heartbeatFresh ? 'Bridge reporting' : 'No recent signal',
       icon: Clock,
       accent: 'text-red-200',
     },

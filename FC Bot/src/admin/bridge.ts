@@ -363,11 +363,12 @@ export class AdminBridge implements AdminEventSink {
     });
 
     if (error || !data.user?.id) {
+      const failureMessage = formatInviteFailureMessage(error?.message ?? 'Invite did not return a user id.');
       await this.persistSecurityEvent('warning', 'admin_invite_failed', 'Admin invite failed.', {
         email,
-        reason: error?.message ?? 'missing user id',
+        reason: failureMessage,
       });
-      return { ok: false, message: error?.message ?? 'Invite did not return a user id.' };
+      return { ok: false, message: failureMessage };
     }
 
     const { error: profileError } = await this.client.from('admin_users').upsert({
@@ -461,6 +462,19 @@ export class AdminBridge implements AdminEventSink {
 
 function isSupportedAction(value: string): value is AdminActionType {
   return supportedActions.has(value as AdminActionType);
+}
+
+function formatInviteFailureMessage(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes('rate limit') || lower.includes('email rate')) {
+    return 'Supabase email rate limit reached. Wait for the quota window to reset or configure custom SMTP in Supabase Auth.';
+  }
+
+  if (lower.includes('smtp') || lower.includes('mail') || lower.includes('email')) {
+    return `Supabase could not send the invite email: ${message}`;
+  }
+
+  return message;
 }
 
 function readPayloadString(payload: unknown, key: string): string | null {

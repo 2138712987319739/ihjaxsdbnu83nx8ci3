@@ -35,6 +35,7 @@ export type BotConfig = {
 
 export type BotStatus = {
   online: boolean;
+  heartbeatFresh: boolean;
   currentPlayers: number;
   totalJoins: number;
   targetHost: string;

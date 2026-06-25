@@ -9,6 +9,8 @@ import { defaultConfig, sampleDashboardData } from '@/lib/sample-data';
 
 type SupabaseRecord = Record<string, unknown>;
 
+const HEARTBEAT_FRESH_MS = 90000;
+
 export function useDashboardData(enabled: boolean) {
   const queryClient = useQueryClient();
   const supabase = getSupabaseClient();
@@ -72,11 +74,15 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
 
   const statusRow = status.data as SupabaseRecord | null;
   const configRow = config.data as SupabaseRecord | null;
+  const lastHeartbeat = stringValue(statusRow?.last_heartbeat, '');
+  const heartbeatFresh = isFreshHeartbeat(lastHeartbeat);
+  const online = Boolean(statusRow?.online) && heartbeatFresh;
 
   return {
     config: mapConfig(configRow),
     status: {
-      online: Boolean(statusRow?.online),
+      online,
+      heartbeatFresh,
       currentPlayers: numberValue(statusRow?.current_players),
       totalJoins: numberValue(statusRow?.total_joins),
       targetHost: stringValue(statusRow?.target_host, defaultConfig.targetHost),
@@ -85,7 +91,7 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       joinability: stringValue(statusRow?.joinability, defaultConfig.joinability) as DashboardData['status']['joinability'],
       friendPolicy: stringValue(statusRow?.friend_policy, defaultConfig.friendPolicy) as DashboardData['status']['friendPolicy'],
       lockdownMode: booleanValue(statusRow?.lockdown_mode, defaultConfig.lockdownMode),
-      lastHeartbeat: stringValue(statusRow?.last_heartbeat, ''),
+      lastHeartbeat,
     },
     adminUsers: ((adminUsers.data ?? []) as SupabaseRecord[]).map((row) => ({
       id: stringValue(row.user_id, crypto.randomUUID()),
@@ -206,6 +212,11 @@ function mapConfig(row: SupabaseRecord | null): DashboardData['config'] {
 
 function stringValue(value: unknown, fallback: string): string {
   return typeof value === 'string' && value ? value : fallback;
+}
+
+function isFreshHeartbeat(value: string): boolean {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= HEARTBEAT_FRESH_MS;
 }
 
 function panelFontValue(value: unknown): DashboardData['config']['panelFont'] {
