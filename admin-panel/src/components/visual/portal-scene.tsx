@@ -81,6 +81,7 @@ export function PortalScene({ online }: { online: boolean }) {
 function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: Pulse[]; reducedMotion: boolean }) {
   const groupRef = useRef<Group>(null);
   const pointer = useRef({ x: 0, y: 0 });
+  const origin = useMemo(() => ({ x: 1.05, y: -0.16, z: -2.55 }), []);
 
   useEffect(() => {
     if (reducedMotion) {
@@ -111,23 +112,23 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
     const lift = online ? 0.08 : -0.04;
     group.rotation.y += (pointer.current.x * 0.16 - group.rotation.y) * delta * 3.4;
     group.rotation.x += (-pointer.current.y * 0.08 - group.rotation.x) * delta * 3.4;
-    group.position.x += (pointer.current.x * 0.32 - group.position.x) * delta * 2.4;
-    group.position.y += (lift - pointer.current.y * 0.14 - group.position.y) * delta * 2.4;
+    group.position.x += (origin.x + pointer.current.x * 0.42 - group.position.x) * delta * 2.4;
+    group.position.y += (origin.y + lift - pointer.current.y * 0.18 - group.position.y) * delta * 2.4;
   });
 
   return (
-    <group ref={groupRef} position={[0.45, 0, -2.25]} rotation={[0, -0.12, 0]}>
+    <group ref={groupRef} position={[origin.x, origin.y, origin.z]} rotation={[0, -0.12, 0]} scale={[1.35, 1.35, 1.35]}>
       <Text
         anchorX="center"
         anchorY="middle"
-        fontSize={2.65}
+        fontSize={3.2}
         letterSpacing={-0.065}
         position={[0, 0.08, 0]}
       >
         FMC
         <meshStandardMaterial
-          color={online ? '#d7dce6' : '#778294'}
-          emissive={online ? '#151b29' : '#070a10'}
+          color={online ? '#f2f6ff' : '#a9b4c7'}
+          emissive={online ? '#1d2b44' : '#0b111d'}
           metalness={0.18}
           roughness={0.34}
         />
@@ -135,9 +136,9 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
       <Text
         anchorX="center"
         anchorY="middle"
-        fontSize={0.28}
+        fontSize={0.32}
         letterSpacing={0.18}
-        position={[0.02, -1.55, 0.06]}
+        position={[0.02, -1.78, 0.06]}
       >
         FRACTURE MC
         <meshBasicMaterial color={online ? '#8fb7ff' : '#64748b'} transparent opacity={0.72} />
@@ -173,7 +174,7 @@ function StaticSegment({ start, end, online }: { start: Point; end: Point; onlin
   return (
     <mesh position={segment.center} rotation={[0, 0, segment.angle]} scale={[segment.length, 1, 1]}>
       <boxGeometry args={[1, 0.012, 0.012]} />
-      <meshBasicMaterial color={online ? '#f8fafc' : '#a5adbb'} transparent opacity={online ? 0.18 : 0.1} />
+      <meshBasicMaterial color={online ? '#f8fafc' : '#b8c1d1'} transparent opacity={online ? 0.28 : 0.18} />
     </mesh>
   );
 }
