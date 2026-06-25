@@ -21,9 +21,9 @@ export function LoginPanel({ mode = 'login', firstAdminAvailable = false, userEm
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const activeEmail = userEmail || email;
-  const title = mode === 'setup-password' ? 'Set Your Password' : firstAdminAvailable ? 'Create Owner Login' : 'Admin Login';
+  const title = mode === 'setup-password' ? 'Create Account' : firstAdminAvailable ? 'Create Owner Login' : 'Admin Login';
   const description = mode === 'setup-password'
-    ? 'Finish your invited account before opening the dashboard.'
+    ? 'Create your panel account, then sign in normally.'
     : firstAdminAvailable
       ? 'Create the first private owner account for this panel.'
       : 'Use your Fracture MC admin email and password.';
@@ -63,7 +63,8 @@ export function LoginPanel({ mode = 'login', firstAdminAvailable = false, userEm
           throw profileError;
         }
 
-        setMessage('Password saved. Opening the dashboard.');
+        setMessage('Account created. Redirecting to login.');
+        await supabase.auth.signOut();
         window.location.reload();
         return;
       }
@@ -151,12 +152,14 @@ export function LoginPanel({ mode = 'login', firstAdminAvailable = false, userEm
           ) : null}
           <Button className="w-full" onClick={() => void submit()} disabled={!canSubmit || busy}>
             <ShieldCheck size={16} />
-            {busy ? 'Working...' : mode === 'setup-password' ? 'Save passcode' : firstAdminAvailable ? 'Create owner account' : 'Sign in'}
+            {busy ? 'Working...' : mode === 'setup-password' ? 'Create account' : firstAdminAvailable ? 'Create owner account' : 'Sign in'}
           </Button>
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
-          <p className="text-xs text-muted-foreground">
-            Invited users must open their email invitation first, set a passcode here, and then sign in normally.
-          </p>
+          {mode === 'setup-password' ? (
+            <p className="text-xs text-muted-foreground">
+              After creating the account, use this email and passcode on the login screen.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     </main>
