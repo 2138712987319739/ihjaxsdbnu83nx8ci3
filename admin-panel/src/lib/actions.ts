@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import type { BotConfig } from '@/types/admin';
 import { configSchema } from '@/lib/config-schema';
 import { getPublicEnv } from '@/lib/env';
@@ -82,7 +81,7 @@ export function configToPatch(config: BotConfig) {
     bedrockPort: config.targetPort,
     botUsername: config.displayName,
     joinability: config.joinability,
-    useBrandColors: config.useBrandColors,
+    useBrandColors: false,
     worldHostName: config.displayName,
     worldName: config.sessionCardText,
     worldVersion: config.worldVersion,

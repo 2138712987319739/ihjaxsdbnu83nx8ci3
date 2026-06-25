@@ -1,9 +1,6 @@
 import type { Logger } from './logger';
 import { getErrorMessage } from './logger';
 
-/**
- * Retry configuration for failed operations
- */
 type RetryConfig = {
   maxRetries: number;
   initialDelayMs: number;
@@ -11,9 +8,6 @@ type RetryConfig = {
   backoffMultiplier: number;
 };
 
-/**
- * A queued item waiting for retry
- */
 type QueuedItem<T> = {
   id: string;
   data: T;
@@ -21,10 +15,6 @@ type QueuedItem<T> = {
   nextRetryAt: number;
 };
 
-/**
- * Generic retry queue with exponential backoff
- * Useful for operations that may fail temporarily (network issues, rate limits, etc.)
- */
 export class RetryQueue<T> {
   private readonly queue = new Map<string, QueuedItem<T>>();
   private timer: NodeJS.Timeout | null = null;
@@ -37,12 +27,9 @@ export class RetryQueue<T> {
     private readonly checkIntervalMs = 5000,
   ) {}
 
-  /**
-   * Add an item to the retry queue
-   */
-  enqueue(id: string, data: T): void {
+    enqueue(id: string, data: T): void {
     if (this.queue.has(id)) {
-      return; // Already queued
+      return;
     }
 
     this.queue.set(id, {
@@ -55,17 +42,11 @@ export class RetryQueue<T> {
     this.logger.debug('Item added to retry queue', { id, queueSize: this.queue.size });
   }
 
-  /**
-   * Remove an item from the queue (e.g., after manual success)
-   */
-  dequeue(id: string): boolean {
+    dequeue(id: string): boolean {
     return this.queue.delete(id);
   }
 
-  /**
-   * Start processing the queue
-   */
-  start(): void {
+    start(): void {
     if (this.running) {
       return;
     }
@@ -75,10 +56,7 @@ export class RetryQueue<T> {
     this.logger.info('Retry queue started');
   }
 
-  /**
-   * Stop processing the queue
-   */
-  stop(): void {
+    stop(): void {
     this.running = false;
     if (this.timer) {
       clearInterval(this.timer);
@@ -87,17 +65,11 @@ export class RetryQueue<T> {
     this.logger.info('Retry queue stopped', { remainingItems: this.queue.size });
   }
 
-  /**
-   * Get current queue size
-   */
-  size(): number {
+    size(): number {
     return this.queue.size;
   }
 
-  /**
-   * Clear all items from the queue
-   */
-  clear(): void {
+    clear(): void {
     this.queue.clear();
     this.logger.info('Retry queue cleared');
   }
@@ -158,4 +130,3 @@ export class RetryQueue<T> {
   }
 }
 
-// Made with Bob

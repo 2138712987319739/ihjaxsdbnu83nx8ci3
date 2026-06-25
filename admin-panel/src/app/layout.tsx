@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import type { Metadata } from 'next';
 import './globals.css';
 

@@ -56,11 +56,6 @@ export function getErrorMessage(error: unknown): string {
   }
   return String(error);
 }
-
-/**
- * Pattern to detect sensitive field names that should be redacted
- * Matches common secret/credential field names in various formats
- */
 const SENSITIVE_FIELD_PATTERN = /token|secret|password|cookie|auth|key|credential|bearer|api[_-]?key|access[_-]?token|refresh[_-]?token|private[_-]?key|session[_-]?id/i;
 
 function sanitizeFields(fields: LogFields): LogFields {

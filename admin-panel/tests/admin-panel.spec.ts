@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { expect, test } from '@playwright/test';
 
 test('loads dashboard, renders controls, and draws the scene', async ({ page }) => {

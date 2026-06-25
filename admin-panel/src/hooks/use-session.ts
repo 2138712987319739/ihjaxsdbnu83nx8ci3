@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 'use client';
 
 import { useEffect, useState } from 'react';

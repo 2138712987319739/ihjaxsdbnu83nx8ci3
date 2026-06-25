@@ -20,14 +20,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.106.2",
-    "bedrock-portal": "2.3.0",
+    "bedrock-portal": "2.4.0",
+    "bedrock-portal-nethernet": "2.4.0",
     "dotenv": "^17.4.2",
     "prismarine-auth": "3.1.1"
   },
   "overrides": {
     "uuid": "11.1.1"
   },
-  "_comment_overrides": "UUID override ensures consistent version across all dependencies to avoid conflicts with prismarine-auth and bedrock-portal",
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "25.9.1",

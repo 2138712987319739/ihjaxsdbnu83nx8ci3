@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 

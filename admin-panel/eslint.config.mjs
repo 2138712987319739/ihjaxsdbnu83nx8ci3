@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import js from '@eslint/js';
 import nextPlugin from '@next/eslint-plugin-next';
 import tseslint from 'typescript-eslint';

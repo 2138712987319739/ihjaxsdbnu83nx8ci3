@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { Activity, Clock, LogIn, Users } from 'lucide-react';
 import type { DashboardData } from '@/types/admin';
 import { Card, CardContent } from '@/components/ui/card';

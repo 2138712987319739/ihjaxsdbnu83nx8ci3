@@ -15,9 +15,6 @@ import { normalizeRemoteConfigPatch } from './config';
 import { RetryQueue } from './retry-queue';
 import { UNSUPPORTED_ACTION_MESSAGE } from './constants';
 
-/**
- * Data structure for queued invite retry
- */
 type InviteRetryData = {
   xuid: string;
   gamertag: string;
@@ -45,8 +42,8 @@ export class FriendConnectService implements AdminServiceController {
     this.inviteRetryQueue = new RetryQueue<InviteRetryData>(
       {
         maxRetries: 3,
-        initialDelayMs: 30000, // 30 seconds
-        maxDelayMs: 300000, // 5 minutes
+        initialDelayMs: 5000,
+        maxDelayMs: 60000,
         backoffMultiplier: 2,
       },
       (data) => this.retryInvite(data),
@@ -226,7 +223,7 @@ export class FriendConnectService implements AdminServiceController {
   private bindPortalEvents(portal: BedrockPortal): void {
     portal.on('sessionCreated', () => {
       this.logger.info('Bedrock session published', {
-        display: 'Fracture MC',
+        display: getSessionText(this.config.worldHostName, false),
         target: `${this.config.bedrockHost}:${this.config.bedrockPort}`,
       });
       this.recordEvent({
@@ -312,10 +309,6 @@ export class FriendConnectService implements AdminServiceController {
     });
   }
 
-  /**
-   * Invite a friend to the session
-   * Failed invites are automatically queued for retry
-   */
   private inviteFriend(player: PortalPlayer): void {
     if (!this.config.autoInviteOnFriendAdded) {
       return;
@@ -323,7 +316,7 @@ export class FriendConnectService implements AdminServiceController {
 
     const xuid = player.profile?.xuid;
     const gamertag = player.profile?.gamertag ?? 'unknown';
-    
+
     if (!xuid) {
       this.logger.warn('Cannot invite friend without XUID', { gamertag });
       return;
@@ -337,7 +330,6 @@ export class FriendConnectService implements AdminServiceController {
     void this.portal?.invitePlayer(xuid)
       .then(() => {
         this.logger.info('Invite sent', { gamertag, xuid });
-        // Remove from retry queue if it was there
         this.inviteRetryQueue.dequeue(xuid);
         this.recordEvent({
           type: 'invite_sent',
@@ -352,10 +344,8 @@ export class FriendConnectService implements AdminServiceController {
           xuid,
           error: getErrorMessage(error),
         });
-        
-        // Add to retry queue
         this.inviteRetryQueue.enqueue(xuid, { xuid, gamertag });
-        
+
         this.recordEvent({
           type: 'invite_failed',
           message: getErrorMessage(error),
@@ -365,9 +355,6 @@ export class FriendConnectService implements AdminServiceController {
       });
   }
 
-  /**
-   * Retry a failed invite (called by retry queue)
-   */
   private async retryInvite(data: InviteRetryData): Promise<void> {
     if (!this.portal) {
       throw new Error('Portal is not running');
@@ -378,7 +365,7 @@ export class FriendConnectService implements AdminServiceController {
       gamertag: data.gamertag,
       xuid: data.xuid,
     });
-    
+
     this.recordEvent({
       type: 'invite_sent',
       message: 'Invite sent after retry.',
@@ -421,7 +408,6 @@ export class FriendConnectService implements AdminServiceController {
       throw new Error('Portal is not running');
     }
 
-    // Report actual player count (can be 0)
     const count = this.portal.getSessionMembers().size;
     await this.portal.updateMemberCount(count, this.config.worldMaxPlayers);
   }
@@ -519,23 +505,6 @@ function readPatchPayload(payload: unknown): unknown {
 
   return payload;
 }
-
-/**
- * Extract player identity from various player data formats
- *
- * Player data can come in different formats from different APIs:
- * - Portal events have a nested `profile` object
- * - Social/friend APIs may have properties at the top level
- *
- * Priority order for gamertag:
- * 1. gamertag (primary identifier)
- * 2. uniqueModernGamertag (unique modern format)
- * 3. modernGamertag (modern format, may not be unique)
- * 4. displayName (fallback display name)
- *
- * @param player - Player data from portal or social APIs
- * @returns Normalized player identity with XUID and gamertag
- */
 function getPlayerIdentity(player: SocialPlayer): PlayerIdentity {
   if ('profile' in player && player.profile) {
     return {

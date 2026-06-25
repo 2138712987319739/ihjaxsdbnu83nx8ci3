@@ -54,13 +54,13 @@ const defaults = {
   botUsername: 'FractureMC',
   authCacheDir: '.runtime/auth',
   joinability: 'friendsOnly',
-  useBrandColors: 'true',
-  worldHostName: 'Fracture MC',
-  worldName: 'Fracture MC | play.fracturemc.com',
+  useBrandColors: 'false',
+  worldHostName: 'FractureMC',
+  worldName: 'FractureMC',
   worldVersion: 'Crossplay Portal',
   updatePresence: 'true',
   worldMaxPlayers: '100',
-  autoFriendAcceptEnabled: 'false',
+  autoFriendAcceptEnabled: 'true',
   autoFriendAddEnabled: 'true',
   autoInviteOnFriendAdded: 'true',
   friendPolicy: 'open',
@@ -82,11 +82,6 @@ const defaults = {
   adminStatusIntervalMs: '10000',
 } as const;
 
-/**
- * Load environment variables from a .env file
- * Uses the dotenv library for better compatibility and edge case handling
- * @param path - Path to the .env file (defaults to .env in current directory)
- */
 export function loadEnvFile(path = resolve(process.cwd(), '.env')): void {
   if (!existsSync(path)) {
     return;
@@ -244,22 +239,15 @@ function readNonEmpty(env: NodeJS.ProcessEnv, key: string, fallback: string): st
   return value;
 }
 
-/**
- * Read and validate a file system path from environment
- * Prevents directory traversal and null byte injection
- */
 function readPath(env: NodeJS.ProcessEnv, key: string, fallback: string): string {
   const value = readNonEmpty(env, key, fallback);
-  
-  // Prevent null byte injection
+
   if (value.includes('\0')) {
     throw new Error(`${key} contains an invalid path character`);
   }
-  
-  // Normalize and resolve the path
+
   const resolvedPath = isAbsolute(value) ? normalize(value) : resolve(process.cwd(), value);
-  
-  // Prevent directory traversal outside of current working directory for relative paths
+
   if (!isAbsolute(value)) {
     const cwd = process.cwd();
     if (!resolvedPath.startsWith(cwd)) {
@@ -423,13 +411,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Normalize and validate a list of values
- * @param value - Comma-separated string or array of values
- * @param key - Configuration key name (for error messages)
- * @param validator - Function to validate each entry
- * @returns Deduplicated array of validated entries
- */
 function normalizeList(
   value: string | unknown[],
   key: string,
@@ -451,8 +432,6 @@ function normalizeList(
     normalized.add(validator(entry, key));
   }
 
-  // Enforce maximum list size to prevent excessive memory usage
-  // and ensure reasonable performance for filtering operations
   if (normalized.size > MAX_LIST_ENTRIES) {
     throw new Error(`${key} cannot contain more than ${MAX_LIST_ENTRIES} entries`);
   }
@@ -467,6 +446,10 @@ function validateDisplayText(value: string, key: string, maxLength: number): str
 
   if (hasControlCharacter(value)) {
     throw new Error(`${key} contains a control character`);
+  }
+
+  if (/\u00a7[0-9A-FK-OR]/i.test(value)) {
+    throw new Error(`${key} cannot contain Minecraft formatting codes`);
   }
 
   return value;
@@ -522,4 +505,3 @@ function hasControlCharacter(value: string): boolean {
 
   return false;
 }
-

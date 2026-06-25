@@ -33,11 +33,11 @@ On first start, complete the Microsoft device login shown in the terminal. The a
 
 1. A Bedrock player adds the bot account from the Friends tab.
 2. The service adds the player back on the follower reconciliation cycle. The default cycle is 5 seconds.
-3. The service invites the player to the joinable Fracture MC session after the add-back event.
+3. The service invites the player to the joinable `FractureMC` session after the add-back event.
 4. The player joins the session card.
 5. The session transfers the player to `play.fracturemc.com:19132`.
 
-The session card uses Fracture MC branding. When Minecraft formatting is honored by the client, the name uses blue and red. If formatting is not honored, the readable fallback remains `Fracture MC`.
+The session card publishes the world name as `FractureMC`. Minecraft formatting codes are rejected so Bedrock clients do not display raw formatting characters.
 
 ## Operations
 

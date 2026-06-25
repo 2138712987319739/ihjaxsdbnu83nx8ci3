@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 'use client';
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
@@ -138,11 +137,6 @@ export function MainPanel({ data, configured }: MainPanelProps) {
                     <Field label="Profile image URL" error={formState.errors.brandingAssetUrl?.message}>
                       <Input placeholder="https://..." {...register('brandingAssetUrl')} />
                     </Field>
-                    <ToggleRow
-                      label="Minecraft color codes"
-                      checked={watched.useBrandColors}
-                      onChange={(checked) => setValue('useBrandColors', checked, { shouldDirty: true, shouldValidate: true })}
-                    />
                   </PanelBlock>
                 </div>
               </TabsContent>

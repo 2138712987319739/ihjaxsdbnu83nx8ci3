@@ -33,12 +33,6 @@ async function main(): Promise<void> {
     }
   }
 }
-
-/**
- * Get the latest version of a package from npm registry
- * @param name - Package name
- * @returns Latest version string
- */
 async function getLatestVersion(name: string): Promise<string> {
   try {
     const { stdout } = await execFileAsync('npm', ['view', name, 'version', '--json'], {
@@ -48,7 +42,6 @@ async function getLatestVersion(name: string): Promise<string> {
     const parsed = JSON.parse(stdout.trim()) as string;
     return parsed;
   } catch (error) {
-    // Handle network errors, rate limiting, or package not found
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to fetch version: ${message}`, { cause: error });
   }

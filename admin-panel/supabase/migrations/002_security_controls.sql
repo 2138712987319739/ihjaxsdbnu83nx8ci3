@@ -1,4 +1,3 @@
--- Website or admin panel made by Clovic.
 alter table public.bot_status
   add column if not exists friend_policy text not null default 'open',
   add column if not exists lockdown_mode boolean not null default false;

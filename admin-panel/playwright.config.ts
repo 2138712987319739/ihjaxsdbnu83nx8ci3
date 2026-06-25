@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({

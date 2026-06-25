@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 

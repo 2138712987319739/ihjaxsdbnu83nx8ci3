@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 export type Joinability = 'inviteOnly' | 'friendsOnly' | 'friendsOfFriends';
 export type FriendPolicy = 'open' | 'allowlist' | 'blocklist';
 export type PanelFont = 'Geist' | 'Inter' | 'System' | 'IBM Plex Sans' | 'Space Grotesk';

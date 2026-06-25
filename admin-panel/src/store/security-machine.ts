@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { setup } from 'xstate';
 
 export type DefenseSignal = 'normal' | 'attention' | 'lockdown';

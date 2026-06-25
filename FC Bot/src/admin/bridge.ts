@@ -112,7 +112,6 @@ export class AdminBridge implements AdminEventSink {
         error: getErrorMessage(error),
         eventType: event.type,
       });
-      // Add to retry queue
       this.eventRetryQueue.enqueue(`${event.type}-${Date.now()}`, event);
     });
   }
@@ -267,11 +266,6 @@ export class AdminBridge implements AdminEventSink {
 
     return this.controller.performAdminAction(action.action_type, action.payload);
   }
-
-  /**
-   * Check if an action can run based on rate limits
-   * Uses a sliding window counter for efficient rate limiting
-   */
   private canRunAction(actionType: AdminActionType): boolean {
     const limit = ACTION_RATE_LIMITS[actionType];
     if (!limit) {
@@ -280,8 +274,6 @@ export class AdminBridge implements AdminEventSink {
 
     const now = Date.now();
     const lastRun = this.recentActionRuns.get(actionType) ?? 0;
-
-    // Simple sliding window: check if enough time has passed since last run
     if (now - lastRun < limit.windowMs / limit.max) {
       return false;
     }

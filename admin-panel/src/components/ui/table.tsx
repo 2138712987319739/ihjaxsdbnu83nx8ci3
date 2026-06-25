@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 

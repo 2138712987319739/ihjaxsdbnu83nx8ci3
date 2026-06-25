@@ -24,11 +24,6 @@ async function main(): Promise<void> {
   adminBridge?.start();
   logger.info('Friend connect service is ready');
 }
-
-/**
- * Gracefully shutdown the service with a timeout
- * If shutdown takes longer than SHUTDOWN_TIMEOUT_MS, force exit
- */
 async function shutdown(signal: string): Promise<void> {
   if (stopping) {
     return;
@@ -36,8 +31,6 @@ async function shutdown(signal: string): Promise<void> {
 
   stopping = true;
   logger.info('Shutdown requested', { signal });
-
-  // Set a timeout to force exit if graceful shutdown hangs
   const forceExitTimer = setTimeout(() => {
     logger.error('Shutdown timeout exceeded, forcing exit');
     process.exit(1);
@@ -61,11 +54,6 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   void shutdown('SIGTERM').finally(() => process.exit(0));
 });
-
-/**
- * Track unhandled rejections and implement circuit breaker
- * If too many occur in a short time, shut down to prevent cascading failures
- */
 process.on('unhandledRejection', (reason: unknown) => {
   unhandledRejectionCount++;
   logger.error('Unhandled promise rejection', {
@@ -77,8 +65,6 @@ process.on('unhandledRejection', (reason: unknown) => {
     logger.error('Too many unhandled rejections, initiating shutdown');
     void shutdown('unhandledRejection').finally(() => process.exit(1));
   }
-
-  // Reset counter after 60 seconds
   setTimeout(() => {
     if (unhandledRejectionCount > 0) {
       unhandledRejectionCount--;

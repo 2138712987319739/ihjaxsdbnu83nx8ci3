@@ -1,4 +1,3 @@
--- Website or admin panel made by Clovic.
 create extension if not exists pgcrypto;
 
 create table if not exists public.admin_users (
@@ -35,7 +34,7 @@ create table if not exists public.bot_status (
   total_joins integer not null default 0,
   target_host text not null default 'play.fracturemc.com',
   target_port integer not null default 19132,
-  session_display text not null default 'Fracture MC',
+  session_display text not null default 'FractureMC',
   joinability text not null default 'friendsOnly',
   started_at timestamptz,
   last_heartbeat timestamptz,
