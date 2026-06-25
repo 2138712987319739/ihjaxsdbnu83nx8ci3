@@ -3,6 +3,8 @@ node_modules/
 out/
 dist/
 .runtime/
+supabase/.temp/
+admin-panel/supabase/.temp/
 playwright-report/
 test-results/
 .env

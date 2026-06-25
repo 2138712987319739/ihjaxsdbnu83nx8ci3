@@ -8,6 +8,7 @@ export type AdminActionType =
   | 'clear_stale_actions'
   | 'disable_lockdown'
   | 'enable_lockdown'
+  | 'invite_admin_user'
   | 'reconnect_portal'
   | 'reload_config'
   | 'republish_session'

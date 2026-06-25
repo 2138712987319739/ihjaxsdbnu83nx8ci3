@@ -22,4 +22,7 @@ test('shows developer tabs and safe fix controls', async ({ page }) => {
   await page.getByRole('tab', { name: 'Security' }).click();
   await expect(page.getByRole('button', { name: /enable lockdown/ })).toBeVisible();
   await expect(page.getByPlaceholder('XUID')).toBeVisible();
+  await page.getByRole('tab', { name: 'Admin Users' }).click();
+  await expect(page.getByText('Invite Admin')).toBeVisible();
+  await expect(page.getByPlaceholder('operator@fracturemc.com')).toBeVisible();
 });

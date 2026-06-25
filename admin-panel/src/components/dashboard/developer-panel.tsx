@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createActor } from 'xstate';
 import { createColumnHelper, flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
-import { Ban, Bug, CheckCircle2, Hammer, LockKeyhole, Play, Radar, ShieldAlert, TerminalSquare, UnlockKeyhole } from 'lucide-react';
-import type { BotAction, BotError, BotEvent, DashboardData, FixLog, PlayerSession, SecurityEvent } from '@/types/admin';
+import { Ban, Bug, CheckCircle2, Hammer, LockKeyhole, MailPlus, Play, Radar, ShieldAlert, TerminalSquare, UnlockKeyhole, UsersRound } from 'lucide-react';
+import type { AdminPermission, AdminRole, AdminUser, BotAction, BotError, BotEvent, DashboardData, FixLog, PlayerSession, SecurityEvent } from '@/types/admin';
 import type { BotActionType } from '@/lib/actions';
 import { ActivityChart } from '@/components/dashboard/activity-chart';
 import { Badge } from '@/components/ui/badge';
@@ -13,13 +13,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { queueBotAction } from '@/lib/actions';
+import { inviteAdminUser, queueBotAction } from '@/lib/actions';
 import { formatDate } from '@/lib/utils';
 import { getDefenseSignal, securityMachine } from '@/store/security-machine';
 
 type DeveloperPanelProps = {
   data: DashboardData;
   configured: boolean;
+  profile: AdminUser | null;
 };
 
 const knownFixes: Record<string, BotActionType> = {
@@ -47,13 +48,24 @@ const securityActions = [
   'disable_lockdown',
 ] as const satisfies readonly BotActionType[];
 
-export function DeveloperPanel({ data, configured }: DeveloperPanelProps) {
+const permissionOptions = [
+  ['config:write', 'Bot config'],
+  ['actions:write', 'Fix actions'],
+  ['users:write', 'Admin users'],
+  ['security:write', 'Security controls'],
+] as const satisfies readonly [AdminPermission, string][];
+
+export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProps) {
   const [activeTab, setActiveTab] = useState('console');
   const [blockXuid, setBlockXuid] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<AdminRole>('operator');
+  const [invitePermissions, setInvitePermissions] = useState<AdminPermission[]>(['actions:write']);
   const [message, setMessage] = useState('');
   const securityActor = useMemo(() => createActor(securityMachine), []);
   const [defenseState, setDefenseState] = useState(String(securityActor.getSnapshot().value));
   const openErrors = data.errors.filter((error) => error.status === 'open').length;
+  const canManageUsers = Boolean(profile?.role === 'owner' || profile?.permissions.includes('users:write'));
 
   useEffect(() => {
     const subscription = securityActor.subscribe((snapshot) => setDefenseState(String(snapshot.value)));
@@ -112,6 +124,39 @@ export function DeveloperPanel({ data, configured }: DeveloperPanelProps) {
     setBlockXuid('');
   }
 
+  async function sendAdminInvite() {
+    if (!configured) {
+      setMessage('Connect Supabase before inviting admins.');
+      return;
+    }
+
+    if (!canManageUsers) {
+      setMessage('Your account does not have Admin users permission.');
+      return;
+    }
+
+    try {
+      await inviteAdminUser({
+        email: inviteEmail,
+        role: inviteRole,
+        permissions: inviteRole === 'owner' ? ['config:write', 'actions:write', 'users:write', 'security:write'] : invitePermissions,
+        redirectTo: window.location.origin + window.location.pathname,
+      });
+      setInviteEmail('');
+      setMessage(`Invite queued for ${inviteEmail.trim().toLowerCase()}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Invite failed.');
+    }
+  }
+
+  function toggleInvitePermission(permission: AdminPermission) {
+    setInvitePermissions((current) => (
+      current.includes(permission)
+        ? current.filter((entry) => entry !== permission)
+        : [...current, permission]
+    ));
+  }
+
   return (
     <section className="grid gap-4">
       <Card>
@@ -135,6 +180,7 @@ export function DeveloperPanel({ data, configured }: DeveloperPanelProps) {
               <TabsTrigger value="errors">Errors</TabsTrigger>
               <TabsTrigger value="fixes">Fixes</TabsTrigger>
               <TabsTrigger value="security">Security</TabsTrigger>
+              <TabsTrigger value="users">Admin Users</TabsTrigger>
               <TabsTrigger value="logs">Fix Logs</TabsTrigger>
               <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
               <TabsTrigger value="actions">Actions</TabsTrigger>
@@ -215,6 +261,56 @@ export function DeveloperPanel({ data, configured }: DeveloperPanelProps) {
                 </section>
                 <section className="min-w-0">
                   <DataTable data={data.securityEvents} columns={securityColumns} empty="No security events recorded." />
+                </section>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="users">
+              <div className="grid gap-4 xl:grid-cols-[0.86fr_1.14fr]">
+                <section className="rounded-lg border border-border bg-black/24 p-3">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <MailPlus size={18} className="text-blue-200" />
+                    Invite Admin
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    <Input type="email" value={inviteEmail} placeholder="operator@fracturemc.com" onChange={(event) => setInviteEmail(event.target.value)} />
+                    <select
+                      className="h-9 rounded-md border border-input bg-black/20 px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                      value={inviteRole}
+                      onChange={(event) => setInviteRole(event.target.value as AdminRole)}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="operator">Operator</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {permissionOptions.map(([permission, label]) => (
+                        <label key={permission} className="flex min-h-11 items-center gap-2 rounded-md border border-border bg-white/5 px-3 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={inviteRole === 'owner' || invitePermissions.includes(permission)}
+                            disabled={inviteRole === 'owner'}
+                            onChange={() => toggleInvitePermission(permission)}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <Button onClick={() => void sendAdminInvite()} disabled={!canManageUsers || !inviteEmail.includes('@')}>
+                      <MailPlus size={16} />
+                      Queue invite
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Invites are sent by the running bot bridge so the service-role key never reaches the browser.
+                    </p>
+                  </div>
+                </section>
+                <section className="min-w-0">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <UsersRound size={17} className="text-blue-200" />
+                    Active and invited accounts
+                  </div>
+                  <DataTable data={data.adminUsers} columns={adminUserColumns} empty="No admin users recorded." />
                 </section>
               </div>
             </TabsContent>
@@ -311,6 +407,15 @@ function DataTable<T>({ data, columns, empty }: { data: T[]; columns: unknown[];
 }
 
 const eventHelper = createColumnHelper<BotEvent>();
+const adminHelper = createColumnHelper<AdminUser>();
+const adminUserColumns = [
+  adminHelper.accessor('email', { header: 'Email' }),
+  adminHelper.accessor('role', { header: 'Role', cell: (info) => <Badge tone={info.getValue() === 'owner' ? 'blue' : 'neutral'}>{info.getValue()}</Badge> }),
+  adminHelper.accessor('permissions', { header: 'Permissions', cell: (info) => info.getValue().join(', ') || 'read only' }),
+  adminHelper.accessor('passwordSetAt', { header: 'Password', cell: (info) => <Badge tone={info.getValue() ? 'green' : 'yellow'}>{info.getValue() ? 'set' : 'pending'}</Badge> }),
+  adminHelper.accessor('lastSeenAt', { header: 'Last seen', cell: (info) => formatDate(info.getValue()) }),
+];
+
 const eventColumns = [
   eventHelper.accessor('type', { header: 'Type' }),
   eventHelper.accessor('message', { header: 'Message' }),

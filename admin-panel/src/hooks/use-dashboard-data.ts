@@ -58,9 +58,10 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
     return sampleDashboardData;
   }
 
-  const [status, config, events, errors, actions, fixLogs, players, securityEvents] = await Promise.all([
+  const [status, config, adminUsers, events, errors, actions, fixLogs, players, securityEvents] = await Promise.all([
     supabase.from('bot_status').select('*').eq('bot_id', botId).maybeSingle(),
     supabase.from('bot_config').select('*').eq('bot_id', botId).maybeSingle(),
+    supabase.from('admin_users').select('*').order('created_at', { ascending: true }).limit(50),
     supabase.from('bot_events').select('*').eq('bot_id', botId).order('created_at', { ascending: false }).limit(40),
     supabase.from('bot_errors').select('*').eq('bot_id', botId).order('created_at', { ascending: false }).limit(30),
     supabase.from('bot_actions').select('*').eq('bot_id', botId).order('created_at', { ascending: false }).limit(30),
@@ -86,6 +87,17 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       lockdownMode: booleanValue(statusRow?.lockdown_mode, defaultConfig.lockdownMode),
       lastHeartbeat: stringValue(statusRow?.last_heartbeat, ''),
     },
+    adminUsers: ((adminUsers.data ?? []) as SupabaseRecord[]).map((row) => ({
+      id: stringValue(row.user_id, crypto.randomUUID()),
+      email: stringValue(row.email, 'unknown'),
+      role: roleValue(row.role),
+      permissions: permissionListValue(row.permissions),
+      invitedAt: nullableString(row.invited_at),
+      acceptedAt: nullableString(row.accepted_at),
+      passwordSetAt: Object.hasOwn(row, 'password_set_at') ? nullableString(row.password_set_at) : stringValue(row.created_at, new Date().toISOString()),
+      lastSeenAt: nullableString(row.last_seen_at),
+      disabledAt: nullableString(row.disabled_at),
+    })),
     events: ((events.data ?? []) as SupabaseRecord[]).map((row) => ({
       id: stringValue(row.id, crypto.randomUUID()),
       type: stringValue(row.event_type, 'event'),
@@ -132,6 +144,27 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       createdAt: stringValue(row.created_at, new Date().toISOString()),
     })),
   };
+}
+
+function roleValue(value: unknown): DashboardData['adminUsers'][number]['role'] {
+  if (value === 'owner' || value === 'admin' || value === 'operator' || value === 'viewer') {
+    return value;
+  }
+
+  return 'viewer';
+}
+
+function permissionListValue(value: unknown): DashboardData['adminUsers'][number]['permissions'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is DashboardData['adminUsers'][number]['permissions'][number] => (
+    entry === 'config:write'
+    || entry === 'actions:write'
+    || entry === 'users:write'
+    || entry === 'security:write'
+  ));
 }
 
 function mapConfig(row: SupabaseRecord | null): DashboardData['config'] {

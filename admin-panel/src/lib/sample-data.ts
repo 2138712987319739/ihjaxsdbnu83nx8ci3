@@ -43,6 +43,7 @@ export const sampleDashboardData: DashboardData = {
     lockdownMode: defaultConfig.lockdownMode,
     lastHeartbeat: null,
   },
+  adminUsers: [],
   events: [
     {
       id: 'sample-event',

@@ -29,6 +29,7 @@ const supportedActions = new Set<AdminActionType>([
   'clear_stale_actions',
   'disable_lockdown',
   'enable_lockdown',
+  'invite_admin_user',
   'reconnect_portal',
   'reload_config',
   'republish_session',
@@ -264,6 +265,10 @@ export class AdminBridge implements AdminEventSink {
       return this.acknowledgeError(action.payload);
     }
 
+    if (action.action_type === 'invite_admin_user') {
+      return this.inviteAdminUser(action);
+    }
+
     return this.controller.performAdminAction(action.action_type, action.payload);
   }
   private canRunAction(actionType: AdminActionType): boolean {
@@ -322,6 +327,93 @@ export class AdminBridge implements AdminEventSink {
     return { ok: true, message: 'Error acknowledged.' };
   }
 
+  private async inviteAdminUser(action: AdminActionRow): Promise<AdminActionResult> {
+    if (!action.created_by) {
+      return { ok: false, message: 'Missing operator identity.' };
+    }
+
+    const permitted = await this.operatorCanManageUsers(action.created_by);
+    if (!permitted) {
+      await this.persistSecurityEvent('warning', 'admin_invite_denied', 'Admin invite denied by permission check.', {
+        createdBy: action.created_by,
+      });
+      return { ok: false, message: 'Admin users permission is required.' };
+    }
+
+    const email = readPayloadString(action.payload, 'email')?.toLowerCase();
+    const role = readAdminRole(action.payload);
+    const permissions = readPermissionList(action.payload, role);
+    const redirectTo = readPayloadString(action.payload, 'redirectTo');
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { ok: false, message: 'Invalid admin email.' };
+    }
+
+    if (!redirectTo || !/^https?:\/\/[^\s"')]+$/i.test(redirectTo)) {
+      return { ok: false, message: 'Invalid invite redirect URL.' };
+    }
+
+    const { data, error } = await this.client.auth.admin.inviteUserByEmail(email, {
+      redirectTo,
+      data: {
+        panel: 'friendconnect',
+        botId: this.config.botId,
+        role,
+      },
+    });
+
+    if (error || !data.user?.id) {
+      await this.persistSecurityEvent('warning', 'admin_invite_failed', 'Admin invite failed.', {
+        email,
+        reason: error?.message ?? 'missing user id',
+      });
+      return { ok: false, message: error?.message ?? 'Invite did not return a user id.' };
+    }
+
+    const { error: profileError } = await this.client.from('admin_users').upsert({
+      user_id: data.user.id,
+      email,
+      role,
+      permissions,
+      invited_by: action.created_by,
+      invited_at: new Date().toISOString(),
+      accepted_at: null,
+      password_set_at: null,
+      disabled_at: null,
+    }, { onConflict: 'user_id' });
+
+    if (profileError) {
+      return { ok: false, message: profileError.message };
+    }
+
+    await this.persistSecurityEvent('info', 'admin_invite_sent', 'Admin invite sent.', {
+      email,
+      role,
+      createdBy: action.created_by,
+    });
+
+    return { ok: true, message: `Invite sent to ${email}.`, data: { role, permissions } };
+  }
+
+  private async operatorCanManageUsers(userId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('admin_users')
+      .select('role, permissions, disabled_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error || !data || data.disabled_at) {
+      return false;
+    }
+
+    const row = data as { role?: unknown; permissions?: unknown };
+    if (row.role === 'owner') {
+      return true;
+    }
+
+    return Array.isArray(row.permissions) && row.permissions.includes('users:write');
+  }
+
   private async updateAction(id: string, update: ActionUpdate): Promise<void> {
     const { error } = await this.client.from('bot_actions').update(update).eq('id', id);
 
@@ -378,4 +470,36 @@ function readPayloadString(payload: unknown, key: string): string | null {
 
   const value = (payload as Record<string, unknown>)[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readAdminRole(payload: unknown): 'admin' | 'operator' | 'viewer' {
+  const role = readPayloadString(payload, 'role');
+  if (role === 'admin' || role === 'operator' || role === 'viewer') {
+    return role;
+  }
+
+  return 'operator';
+}
+
+function readPermissionList(payload: unknown, role: 'admin' | 'operator' | 'viewer'): string[] {
+  if (role === 'viewer') {
+    return [];
+  }
+
+  const defaultPermissions = role === 'admin'
+    ? ['config:write', 'actions:write', 'users:write', 'security:write']
+    : ['actions:write'];
+
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return defaultPermissions;
+  }
+
+  const value = (payload as Record<string, unknown>).permissions;
+  if (!Array.isArray(value)) {
+    return defaultPermissions;
+  }
+
+  const allowed = new Set(['config:write', 'actions:write', 'users:write', 'security:write']);
+  const sanitized = value.filter((entry): entry is string => typeof entry === 'string' && allowed.has(entry));
+  return [...new Set(sanitized)];
 }

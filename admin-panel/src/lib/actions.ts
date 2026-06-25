@@ -1,4 +1,4 @@
-import type { BotConfig } from '@/types/admin';
+import type { AdminPermission, AdminRole, BotConfig } from '@/types/admin';
 import { configSchema } from '@/lib/config-schema';
 import { getPublicEnv } from '@/lib/env';
 import { getSupabaseClient } from '@/lib/supabase';
@@ -11,6 +11,7 @@ export type BotActionType =
   | 'clear_stale_actions'
   | 'disable_lockdown'
   | 'enable_lockdown'
+  | 'invite_admin_user'
   | 'reconnect_portal'
   | 'reload_config'
   | 'republish_session'
@@ -44,6 +45,25 @@ export async function queueBotAction(actionType: BotActionType, payload: Record<
   if (error) {
     throw new Error(error.message);
   }
+}
+
+export async function inviteAdminUser(input: {
+  email: string;
+  role: AdminRole;
+  permissions: AdminPermission[];
+  redirectTo: string;
+}) {
+  const email = input.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Enter a valid email address.');
+  }
+
+  await queueBotAction('invite_admin_user', {
+    email,
+    role: input.role,
+    permissions: input.permissions,
+    redirectTo: input.redirectTo,
+  });
 }
 
 export async function saveBotConfig(config: BotConfig) {

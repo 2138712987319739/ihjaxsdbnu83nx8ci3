@@ -1,6 +1,8 @@
 export type Joinability = 'inviteOnly' | 'friendsOnly' | 'friendsOfFriends';
 export type FriendPolicy = 'open' | 'allowlist' | 'blocklist';
 export type PanelFont = 'Geist' | 'Inter' | 'System' | 'IBM Plex Sans' | 'Space Grotesk';
+export type AdminRole = 'owner' | 'admin' | 'operator' | 'viewer';
+export type AdminPermission = 'config:write' | 'actions:write' | 'users:write' | 'security:write';
 
 export type BotConfig = {
   displayName: string;
@@ -95,9 +97,22 @@ export type SecurityEvent = {
   createdAt: string;
 };
 
+export type AdminUser = {
+  id: string;
+  email: string;
+  role: AdminRole;
+  permissions: AdminPermission[];
+  invitedAt: string | null;
+  acceptedAt: string | null;
+  passwordSetAt: string | null;
+  lastSeenAt: string | null;
+  disabledAt: string | null;
+};
+
 export type DashboardData = {
   config: BotConfig;
   status: BotStatus;
+  adminUsers: AdminUser[];
   events: BotEvent[];
   errors: BotError[];
   actions: BotAction[];
