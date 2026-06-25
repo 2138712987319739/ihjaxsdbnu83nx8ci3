@@ -14,7 +14,6 @@ import type {
 import { getErrorMessage } from '../logger';
 import { RetryQueue } from '../retry-queue';
 import { ACTION_RATE_LIMITS, DEFAULT_STALE_ACTION_THRESHOLD_MS, UNSUPPORTED_ACTION_MESSAGE } from '../constants';
-import { sendAdminInviteEmail } from './mailer';
 
 type ActionUpdate = {
   status: 'running' | 'completed' | 'failed';
@@ -545,6 +544,7 @@ export class AdminBridge implements AdminEventSink {
 
     if (this.config.inviteMailer.enabled) {
       try {
+        const { sendAdminInviteEmail } = await import('./mailer.js');
         await sendAdminInviteEmail(this.config.inviteMailer, email, manualInviteLink);
         await this.persistSecurityEvent('info', 'admin_invite_sent', 'Admin invite sent through configured SMTP provider.', {
           email,
