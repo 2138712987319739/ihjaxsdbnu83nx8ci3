@@ -43,11 +43,15 @@ function AdminShellContent() {
     return <SetupRequired />;
   }
 
-  if (!loading && configured && user && profile && !profile.passwordSetAt) {
+  if (loading) {
+    return <AuthLoading />;
+  }
+
+  if (user && profile && !profile.passwordSetAt) {
     return <LoginPanel mode="setup-password" userEmail={profile.email || user.email || ''} />;
   }
 
-  if (!loading && configured && !authenticated) {
+  if (!authenticated) {
     if (user && !profile && !firstAdminAvailable) {
       return <AccessDenied email={user.email ?? 'unknown'} />;
     }
@@ -194,6 +198,24 @@ function SetupRequired() {
             After the database migration is applied, the first signed-in account becomes the owner.
           </div>
         </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+function AuthLoading() {
+  return (
+    <main className="grid min-h-screen place-items-center px-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-md border border-blue-300/30 bg-blue-500/16 text-blue-200">
+            <ShieldCheck size={21} />
+          </div>
+          <CardTitle>Checking Access</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The panel is verifying the current admin session before loading controls.
+          </p>
+        </CardHeader>
       </Card>
     </main>
   );
