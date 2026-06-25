@@ -1,0 +1,131 @@
+/* Website or admin panel made by Clovic. */
+@import "tailwindcss";
+
+:root {
+  --background: #080b13;
+  --foreground: #f7f9ff;
+  --card: #101726;
+  --card-foreground: #f7f9ff;
+  --muted: #172033;
+  --muted-foreground: #a9b3c7;
+  --border: rgba(148, 163, 184, 0.22);
+  --input: rgba(148, 163, 184, 0.18);
+  --primary: #2777ff;
+  --primary-foreground: #ffffff;
+  --destructive: #ff3f5f;
+  --destructive-foreground: #ffffff;
+  --ring: #4ea1ff;
+  --radius: 0.5rem;
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "SFMono-Regular", ui-monospace, monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "SFMono-Regular", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background:
+    linear-gradient(90deg, rgba(39, 119, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 63, 95, 0.055) 1px, transparent 1px),
+    linear-gradient(135deg, #070a12 0%, #0b1221 47%, #151018 100%);
+  background-size: 44px 44px, 44px 44px, auto;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+canvas {
+  display: block;
+}
+
+::selection {
+  background: rgba(39, 119, 255, 0.45);
+  color: #ffffff;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.control-preview {
+  min-height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--preview-primary) 26%, transparent), transparent 36%),
+    linear-gradient(315deg, color-mix(in srgb, var(--preview-secondary) 24%, transparent), transparent 38%),
+    rgba(0, 0, 0, 0.28);
+  padding: 1rem;
+}
+
+.control-core-icon {
+  display: grid;
+  width: 4rem;
+  height: 4rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--preview-primary) 52%, transparent);
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--preview-primary) 16%, transparent), color-mix(in srgb, var(--preview-secondary) 14%, transparent));
+  color: #dbeafe;
+}
+
+@media (min-width: 1080px) {
+  .panel-grid {
+    grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.18fr);
+  }
+}
+
+@media (min-width: 760px) {
+  .control-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

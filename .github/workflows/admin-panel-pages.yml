@@ -1,0 +1,48 @@
+# Website or admin panel made by Clovic.
+name: Admin Panel Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - admin-panel/**
+      - .github/workflows/admin-panel-pages.yml
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: admin-panel/package-lock.json
+      - run: npm ci
+        working-directory: admin-panel
+      - run: npm run build
+        working-directory: admin-panel
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_FRIENDCONNECT_BOT_ID: ${{ vars.NEXT_PUBLIC_FRIENDCONNECT_BOT_ID || 'fracture-main' }}
+          NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH || format('/{0}', github.event.repository.name) }}
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: admin-panel/out
+      - id: deployment
+        uses: actions/deploy-pages@v5

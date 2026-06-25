@@ -1,0 +1,61 @@
+// Website or admin panel made by Clovic.
+import type { BotConfig, DashboardData } from '@/types/admin';
+
+export const defaultConfig = {
+  displayName: 'Fracture MC',
+  targetHost: 'play.fracturemc.com',
+  targetPort: 19132,
+  primaryColor: '#2777ff',
+  secondaryColor: '#ff3f5f',
+  panelFont: 'Geist',
+  brandingAssetUrl: '',
+  joinability: 'friendsOnly',
+  useBrandColors: true,
+  worldVersion: 'Crossplay Portal',
+  updatePresence: true,
+  inviteCooldownMs: 90000,
+  worldMaxPlayers: 100,
+  sessionCardText: 'Fracture MC | play.fracturemc.com',
+  autoFriendAcceptEnabled: false,
+  autoFriendAddEnabled: true,
+  autoInviteOnFriendAdded: true,
+  friendPolicy: 'open',
+  allowlistXuids: [],
+  allowlistGamertags: [],
+  blocklistXuids: [],
+  blocklistGamertags: [],
+  lockdownMode: false,
+  friendCheckIntervalMs: 5000,
+  friendAddIntervalMs: 5000,
+  friendRemoveIntervalMs: 2500,
+} satisfies BotConfig;
+
+export const sampleDashboardData: DashboardData = {
+  config: defaultConfig,
+  status: {
+    online: false,
+    currentPlayers: 0,
+    totalJoins: 0,
+    targetHost: defaultConfig.targetHost,
+    targetPort: defaultConfig.targetPort,
+    sessionDisplay: defaultConfig.displayName,
+    joinability: defaultConfig.joinability,
+    friendPolicy: defaultConfig.friendPolicy,
+    lockdownMode: defaultConfig.lockdownMode,
+    lastHeartbeat: null,
+  },
+  events: [
+    {
+      id: 'sample-event',
+      type: 'setup',
+      message: 'Connect Supabase to show live bot events.',
+      gamertag: null,
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  errors: [],
+  actions: [],
+  fixLogs: [],
+  players: [],
+  securityEvents: [],
+};

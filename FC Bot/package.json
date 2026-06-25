@@ -1,0 +1,38 @@
+{
+  "name": "fracture-friend-connect",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fracture MC Bedrock friend connect service",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
+    "start": "node dist/index.js",
+    "audit": "npm audit --omit=dev",
+    "doctor": "npm run build --silent && node dist/scripts/doctor.js",
+    "check:updates": "npm run build --silent && node dist/scripts/check-updates.js",
+    "scan": "npm run build --silent && node dist/scripts/final-scan.js",
+    "test": "npm run typecheck && npm run lint && npm run build && node dist/scripts/doctor.js && node dist/scripts/final-scan.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.106.2",
+    "bedrock-portal": "2.3.0",
+    "dotenv": "^17.4.2",
+    "prismarine-auth": "3.1.1"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
+  "_comment_overrides": "UUID override ensures consistent version across all dependencies to avoid conflicts with prismarine-auth and bedrock-portal",
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "25.9.1",
+    "eslint": "10.4.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.60.0"
+  }
+}
