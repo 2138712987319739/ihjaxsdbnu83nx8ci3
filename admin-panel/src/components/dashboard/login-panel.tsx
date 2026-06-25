@@ -5,6 +5,7 @@ import { KeyRound, LockKeyhole, ShieldCheck, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { getPublicEnv } from '@/lib/env';
 import { getSupabaseClient } from '@/lib/supabase';
 
 type LoginPanelProps = {
@@ -86,6 +87,9 @@ export function LoginPanel({ mode = 'login', firstAdminAvailable = false, userEm
         const { error } = await supabase.auth.signUp({
           email: activeEmail.trim().toLowerCase(),
           ['password']: credential,
+          options: {
+            emailRedirectTo: getAuthRedirectUrl(),
+          },
         });
         if (error) {
           throw error;
@@ -157,4 +161,9 @@ export function LoginPanel({ mode = 'login', firstAdminAvailable = false, userEm
       </Card>
     </main>
   );
+}
+
+function getAuthRedirectUrl(): string {
+  const env = getPublicEnv();
+  return `${window.location.origin}${env.basePath}/`;
 }
