@@ -70,6 +70,7 @@ export type BotAction = {
   actionType: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   message: string | null;
+  manualInviteLink: string | null;
   createdAt: string;
 };
 

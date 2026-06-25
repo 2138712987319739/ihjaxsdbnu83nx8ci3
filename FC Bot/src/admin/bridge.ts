@@ -364,6 +364,10 @@ export class AdminBridge implements AdminEventSink {
 
     if (error || !data.user?.id) {
       const failureMessage = formatInviteFailureMessage(error?.message ?? 'Invite did not return a user id.');
+      if (shouldGenerateManualInviteLink(failureMessage)) {
+        return this.generateManualAdminInviteLink(action, email, role, permissions, redirectTo, failureMessage);
+      }
+
       await this.persistSecurityEvent('warning', 'admin_invite_failed', 'Admin invite failed.', {
         email,
         reason: failureMessage,
@@ -394,6 +398,67 @@ export class AdminBridge implements AdminEventSink {
     });
 
     return { ok: true, message: `Invite sent to ${email}.`, data: { role, permissions } };
+  }
+
+  private async generateManualAdminInviteLink(
+    action: AdminActionRow,
+    email: string,
+    role: 'admin' | 'operator' | 'viewer',
+    permissions: string[],
+    redirectTo: string,
+    reason: string,
+  ): Promise<AdminActionResult> {
+    const { data, error } = await this.client.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: {
+        redirectTo,
+        data: {
+          panel: 'friendconnect',
+          botId: this.config.botId,
+          role,
+        },
+      },
+    });
+
+    const manualInviteLink = data?.properties?.action_link;
+    if (error || !data.user?.id || !manualInviteLink) {
+      const message = error?.message ?? 'Manual invite link generation failed.';
+      await this.persistSecurityEvent('warning', 'admin_invite_failed', 'Admin invite failed.', {
+        email,
+        reason: message,
+      });
+      return { ok: false, message };
+    }
+
+    const { error: profileError } = await this.client.from('admin_users').upsert({
+      user_id: data.user.id,
+      email,
+      role,
+      permissions,
+      invited_by: action.created_by,
+      invited_at: new Date().toISOString(),
+      accepted_at: null,
+      password_set_at: null,
+      disabled_at: null,
+    }, { onConflict: 'user_id' });
+
+    if (profileError) {
+      return { ok: false, message: profileError.message };
+    }
+
+    await this.persistSecurityEvent('warning', 'admin_invite_manual_link', 'Admin invite email unavailable; manual link generated.', {
+      email,
+      role,
+      reason,
+      createdBy: action.created_by,
+    });
+
+    return {
+      ok: true,
+      message: 'Invite link generated. Supabase email quota is currently blocked, so send the generated link manually.',
+      data: { role, permissions, manualInviteLink },
+    };
   }
 
   private async operatorCanManageUsers(userId: string): Promise<boolean> {
@@ -475,6 +540,11 @@ function formatInviteFailureMessage(message: string): string {
   }
 
   return message;
+}
+
+function shouldGenerateManualInviteLink(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('rate limit') || lower.includes('email quota') || lower.includes('email rate');
 }
 
 function readPayloadString(payload: unknown, key: string): string | null {

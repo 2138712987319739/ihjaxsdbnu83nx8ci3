@@ -347,7 +347,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
             </TabsContent>
 
             <TabsContent value="actions">
-              <DataTable data={data.actions} columns={actionColumns} empty="No queued actions." />
+              <DataTable data={data.actions} columns={createActionColumns(canManageUsers)} empty="No queued actions." />
             </TabsContent>
           </Tabs>
           <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
@@ -453,12 +453,30 @@ const fixLogColumns = [
 ];
 
 const actionHelper = createColumnHelper<BotAction>();
-const actionColumns = [
+function createActionColumns(showInviteLinks: boolean) {
+  return [
   actionHelper.accessor('actionType', { header: 'Action' }),
   actionHelper.accessor('status', { header: 'Status', cell: (info) => <Badge tone={info.getValue() === 'completed' ? 'green' : info.getValue() === 'failed' ? 'red' : 'blue'}>{info.getValue()}</Badge> }),
-  actionHelper.accessor('message', { header: 'Result', cell: (info) => info.getValue() ?? 'Pending' }),
+  actionHelper.accessor('message', {
+    header: 'Result',
+    cell: (info) => {
+      const action = info.row.original;
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{info.getValue() ?? 'Pending'}</span>
+          {showInviteLinks && action.manualInviteLink ? (
+            <Button type="button" variant="subtle" onClick={() => void navigator.clipboard.writeText(action.manualInviteLink ?? '')}>
+              <MailPlus size={14} />
+              Copy invite link
+            </Button>
+          ) : null}
+        </div>
+      );
+    },
+  }),
   actionHelper.accessor('createdAt', { header: 'Time', cell: (info) => formatDate(info.getValue()) }),
-];
+  ];
+}
 
 const playerHelper = createColumnHelper<PlayerSession>();
 const playerColumns = [

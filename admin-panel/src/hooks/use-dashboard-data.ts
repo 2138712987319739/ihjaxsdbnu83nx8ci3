@@ -125,6 +125,7 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       actionType: stringValue(row.action_type, 'unknown'),
       status: stringValue(row.status, 'queued') as DashboardData['actions'][number]['status'],
       message: resultMessage(row.result),
+      manualInviteLink: resultManualInviteLink(row.result),
       createdAt: stringValue(row.created_at, new Date().toISOString()),
     })),
     fixLogs: ((fixLogs.data ?? []) as SupabaseRecord[]).map((row) => ({
@@ -254,4 +255,18 @@ function resultMessage(value: unknown): string | null {
 
   const message = (value as SupabaseRecord).message;
   return typeof message === 'string' ? message : null;
+}
+
+function resultManualInviteLink(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const data = (value as SupabaseRecord).data;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return null;
+  }
+
+  const link = (data as SupabaseRecord).manualInviteLink;
+  return typeof link === 'string' && /^https:\/\/[^\s"')]+$/i.test(link) ? link : null;
 }
