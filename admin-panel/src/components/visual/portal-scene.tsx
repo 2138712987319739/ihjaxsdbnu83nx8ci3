@@ -131,6 +131,8 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
           emissive={online ? '#1d2b44' : '#0b111d'}
           metalness={0.18}
           roughness={0.34}
+          transparent
+          opacity={online ? 0.36 : 0.28}
         />
       </Text>
       <Text
@@ -141,7 +143,7 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
         position={[0.02, -1.78, 0.06]}
       >
         FRACTURE MC
-        <meshBasicMaterial color={online ? '#8fb7ff' : '#64748b'} transparent opacity={0.72} />
+        <meshBasicMaterial color={online ? '#8fb7ff' : '#64748b'} transparent opacity={0.46} />
       </Text>
       <LogoSkeleton online={online} />
       {pulses.map((pulse) => (
@@ -174,7 +176,7 @@ function StaticSegment({ start, end, online }: { start: Point; end: Point; onlin
   return (
     <mesh position={segment.center} rotation={[0, 0, segment.angle]} scale={[segment.length, 1, 1]}>
       <boxGeometry args={[1, 0.012, 0.012]} />
-      <meshBasicMaterial color={online ? '#f8fafc' : '#b8c1d1'} transparent opacity={online ? 0.28 : 0.18} />
+      <meshBasicMaterial color={online ? '#f8fafc' : '#b8c1d1'} transparent opacity={online ? 0.12 : 0.08} />
     </mesh>
   );
 }
