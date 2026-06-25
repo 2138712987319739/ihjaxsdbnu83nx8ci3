@@ -36,12 +36,28 @@ async function main(): Promise<void> {
 
   checks.push(await checkDns(config.bedrockHost));
 
+  if (config.admin.enabled) {
+    checks.push({
+      name: 'admin-bridge',
+      ok: Boolean(config.admin.supabaseUrl && config.admin.serviceRoleKey),
+      detail: `bot id ${config.admin.botId}`,
+    });
+
+    checks.push({
+      name: 'admin-invite-mailer',
+      ok: config.admin.inviteMailer.enabled,
+      detail: config.admin.inviteMailer.enabled
+        ? `${config.admin.inviteMailer.host}:${config.admin.inviteMailer.port}`
+        : 'SMTP fallback disabled; Supabase Auth email quota applies',
+    });
+  }
+
   for (const check of checks) {
     const status = check.ok ? 'ok' : 'warn';
     console.log(`${status} ${check.name}: ${check.detail}`);
   }
 
-  const requiredFailures = checks.filter((check) => !check.ok && check.name !== 'dns');
+  const requiredFailures = checks.filter((check) => !check.ok && !['dns', 'admin-invite-mailer'].includes(check.name));
   if (requiredFailures.length > 0) {
     process.exitCode = 1;
   }

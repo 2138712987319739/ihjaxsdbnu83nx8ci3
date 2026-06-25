@@ -84,6 +84,21 @@ FRIENDCONNECT_ADMIN_SUPABASE_SERVICE_ROLE_KEY=
 FRIENDCONNECT_ADMIN_BOT_ID=fracture-main
 ```
 
+Production admin invite emails need a real mail provider. Supabase's built-in Auth mailer is rate-limited for testing. Add SMTP credentials to the Node server environment so the bridge can send account setup links when Supabase blocks its own invite email:
+
+```text
+FRIENDCONNECT_ADMIN_INVITE_SMTP_HOST=smtp.example.com
+FRIENDCONNECT_ADMIN_INVITE_SMTP_PORT=587
+FRIENDCONNECT_ADMIN_INVITE_SMTP_SECURE=false
+FRIENDCONNECT_ADMIN_INVITE_SMTP_USER=
+FRIENDCONNECT_ADMIN_INVITE_SMTP_PASS=
+FRIENDCONNECT_ADMIN_INVITE_FROM=panel@fracturemc.com
+FRIENDCONNECT_ADMIN_INVITE_FROM_NAME=Fracture MC
+FRIENDCONNECT_ADMIN_INVITE_REPLY_TO=support@fracturemc.com
+```
+
+If SMTP is not configured and Supabase email quota is blocked, the bridge generates a setup link and the Actions tab exposes it to owner/admin accounts for manual delivery.
+
 The panel queues allowlisted actions only. It does not expose shell execution, file editing, package updates, or free-form backend commands.
 
 The Main section can update the safe runtime surface: Bedrock target, session text, display name, joinability, world max players, invite cooldown, presence updates, friend automation, add-back timing, friend policy, allowlists, blocklists, and lockdown mode. Xbox account profile images and gamertag changes still have to be made on the Microsoft account itself.

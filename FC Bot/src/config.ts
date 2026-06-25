@@ -44,6 +44,19 @@ export type AdminBridgeConfig = {
   botId: string;
   pollIntervalMs: number;
   statusIntervalMs: number;
+  inviteMailer: AdminInviteMailerConfig;
+};
+
+export type AdminInviteMailerConfig = {
+  enabled: boolean;
+  host: string | null;
+  port: number;
+  secure: boolean;
+  user: string | null;
+  pass: string | null;
+  from: string | null;
+  fromName: string;
+  replyTo: string | null;
 };
 
 export type RemoteConfigPatch = Partial<Omit<RuntimeConfig, 'admin' | 'authCacheDir' | 'logLevel'>>;
@@ -80,6 +93,14 @@ const defaults = {
   adminBotId: 'fracture-main',
   adminPollIntervalMs: '5000',
   adminStatusIntervalMs: '10000',
+  adminInviteSmtpHost: '',
+  adminInviteSmtpPort: '587',
+  adminInviteSmtpSecure: 'false',
+  adminInviteSmtpUser: '',
+  adminInviteSmtpPass: '',
+  adminInviteFrom: '',
+  adminInviteFromName: 'Fracture MC',
+  adminInviteReplyTo: '',
 } as const;
 
 export function loadEnvFile(path = resolve(process.cwd(), '.env')): void {
@@ -332,12 +353,51 @@ function readAdminConfig(env: NodeJS.ProcessEnv): AdminBridgeConfig {
     botId: readNonEmpty(env, 'FRIENDCONNECT_ADMIN_BOT_ID', defaults.adminBotId),
     pollIntervalMs: readInteger(env, 'FRIENDCONNECT_ADMIN_POLL_INTERVAL_MS', defaults.adminPollIntervalMs, 1000, 600000),
     statusIntervalMs: readInteger(env, 'FRIENDCONNECT_ADMIN_STATUS_INTERVAL_MS', defaults.adminStatusIntervalMs, 1000, 600000),
+    inviteMailer: readAdminInviteMailerConfig(env),
+  };
+}
+
+function readAdminInviteMailerConfig(env: NodeJS.ProcessEnv): AdminInviteMailerConfig {
+  const host = readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_HOST', defaults.adminInviteSmtpHost);
+  const user = readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_USER', defaults.adminInviteSmtpUser);
+  const pass = readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_PASS', defaults.adminInviteSmtpPass);
+  const from = readOptionalEmail(env, 'FRIENDCONNECT_ADMIN_INVITE_FROM', defaults.adminInviteFrom);
+  const replyTo = readOptionalEmail(env, 'FRIENDCONNECT_ADMIN_INVITE_REPLY_TO', defaults.adminInviteReplyTo);
+  const enabled = Boolean(host || user || pass || from);
+
+  if (enabled && (!host || !user || !pass || !from)) {
+    throw new Error('Admin invite SMTP requires FRIENDCONNECT_ADMIN_INVITE_SMTP_HOST, FRIENDCONNECT_ADMIN_INVITE_SMTP_USER, FRIENDCONNECT_ADMIN_INVITE_SMTP_PASS, and FRIENDCONNECT_ADMIN_INVITE_FROM');
+  }
+
+  return {
+    enabled,
+    host,
+    port: readInteger(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_PORT', defaults.adminInviteSmtpPort, 1, 65535),
+    secure: readBoolean(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_SECURE', defaults.adminInviteSmtpSecure),
+    user,
+    pass,
+    from,
+    fromName: readDisplayText(env, 'FRIENDCONNECT_ADMIN_INVITE_FROM_NAME', defaults.adminInviteFromName, 80),
+    replyTo,
   };
 }
 
 function readOptional(env: NodeJS.ProcessEnv, key: string, fallback: string): string | null {
   const value = readEnv(env, key, fallback);
   return value ? value : null;
+}
+
+function readOptionalEmail(env: NodeJS.ProcessEnv, key: string, fallback: string): string | null {
+  const value = readOptional(env, key, fallback);
+  if (!value) {
+    return null;
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    throw new Error(`${key} must be a valid email address`);
+  }
+
+  return value;
 }
 
 function readStringValue(value: unknown, key: string): string {

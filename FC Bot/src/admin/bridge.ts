@@ -14,6 +14,7 @@ import type {
 import { getErrorMessage } from '../logger';
 import { RetryQueue } from '../retry-queue';
 import { ACTION_RATE_LIMITS, DEFAULT_STALE_ACTION_THRESHOLD_MS, UNSUPPORTED_ACTION_MESSAGE } from '../constants';
+import { sendAdminInviteEmail } from './mailer';
 
 type ActionUpdate = {
   status: 'running' | 'completed' | 'failed';
@@ -445,6 +446,40 @@ export class AdminBridge implements AdminEventSink {
 
     if (profileError) {
       return { ok: false, message: profileError.message };
+    }
+
+    if (this.config.inviteMailer.enabled) {
+      try {
+        await sendAdminInviteEmail(this.config.inviteMailer, email, manualInviteLink);
+        await this.persistSecurityEvent('info', 'admin_invite_sent', 'Admin invite sent through configured SMTP provider.', {
+          email,
+          role,
+          createdBy: action.created_by,
+        });
+
+        return {
+          ok: true,
+          message: `Invite email sent to ${email} through the configured mail provider.`,
+          data: { role, permissions },
+        };
+      } catch (error: unknown) {
+        this.logger.warn('Admin invite SMTP delivery failed', {
+          email,
+          error: getErrorMessage(error),
+        });
+        await this.persistSecurityEvent('warning', 'admin_invite_mailer_failed', 'Admin invite SMTP delivery failed.', {
+          email,
+          role,
+          reason: 'SMTP delivery failed.',
+          createdBy: action.created_by,
+        });
+
+        return {
+          ok: true,
+          message: 'SMTP invite delivery failed. Copy and send the generated link manually.',
+          data: { role, permissions, manualInviteLink },
+        };
+      }
     }
 
     await this.persistSecurityEvent('warning', 'admin_invite_manual_link', 'Admin invite email unavailable; manual link generated.', {

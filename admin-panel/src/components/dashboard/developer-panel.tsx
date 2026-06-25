@@ -313,7 +313,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                       {bridgeReady ? 'Queue invite' : 'Bridge offline'}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      Invites are sent by the running bot bridge. If Supabase email is rate-limited, the action will fail with the provider message in Actions.
+                      Invites are sent by the running bot bridge. If Supabase email is rate-limited, configure SMTP on the Node server or use the generated link in Actions.
                     </p>
                   </div>
                 </section>

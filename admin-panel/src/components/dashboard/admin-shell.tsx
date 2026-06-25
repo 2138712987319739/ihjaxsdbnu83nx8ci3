@@ -60,13 +60,13 @@ function AdminShellContent() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden px-3 py-3 text-foreground sm:px-5 lg:px-7" style={shellStyle}>
-      <div className="pointer-events-none absolute inset-0 opacity-70">
+    <main className="dashboard-shell relative min-h-screen overflow-hidden px-3 py-3 text-foreground sm:px-5 lg:px-7" style={shellStyle}>
+      <div className="pointer-events-none fixed inset-0 opacity-90">
         <PortalScene online={data.status.online} />
       </div>
 
       <div className="relative z-10 mx-auto flex max-w-[1480px] flex-col gap-3">
-        <header className="grid gap-3 rounded-lg border border-white/12 bg-black/38 p-3 shadow-2xl shadow-black/30 backdrop-blur-xl lg:grid-cols-[1fr_auto] lg:items-center">
+        <header className="command-header grid gap-3 rounded-lg p-3 backdrop-blur-xl lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               {brandingImage ? (
@@ -76,7 +76,7 @@ function AdminShellContent() {
                   style={{ backgroundImage: `url("${brandingImage}")` }}
                 />
               ) : null}
-              <h1 className="text-lg font-semibold tracking-normal sm:text-2xl">
+              <h1 className="fmc-wordmark text-lg font-bold tracking-normal sm:text-2xl">
                 <span className="text-blue-300">Fracture</span> <span className="text-red-300">MC</span> FriendConnect
               </h1>
               <Badge tone={data.status.online ? 'green' : 'red'}>{data.status.online ? 'Online' : 'Offline'}</Badge>
@@ -223,20 +223,20 @@ function AuthLoading() {
 
 function getFontStack(font: string): string {
   if (font === 'Inter') {
-    return 'Inter, Geist, ui-sans-serif, system-ui, sans-serif';
+    return 'Inter, "Fira Sans", ui-sans-serif, system-ui, sans-serif';
   }
 
   if (font === 'IBM Plex Sans') {
-    return '"IBM Plex Sans", Geist, ui-sans-serif, system-ui, sans-serif';
+    return '"IBM Plex Sans", "Fira Sans", ui-sans-serif, system-ui, sans-serif';
   }
 
   if (font === 'Space Grotesk') {
-    return '"Space Grotesk", Geist, ui-sans-serif, system-ui, sans-serif';
+    return '"Space Grotesk", "Fira Sans", ui-sans-serif, system-ui, sans-serif';
   }
 
   if (font === 'System') {
     return 'ui-sans-serif, system-ui, sans-serif';
   }
 
-  return 'Geist, Inter, ui-sans-serif, system-ui, sans-serif';
+  return '"Fira Sans", ui-sans-serif, system-ui, sans-serif';
 }

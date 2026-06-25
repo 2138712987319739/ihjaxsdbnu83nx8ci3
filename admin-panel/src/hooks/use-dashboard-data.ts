@@ -267,6 +267,6 @@ function resultManualInviteLink(value: unknown): string | null {
     return null;
   }
 
-  const link = (data as SupabaseRecord).manualInviteLink;
+  const link = (data as SupabaseRecord).manualInviteLink ?? (data as SupabaseRecord).actionLink;
   return typeof link === 'string' && /^https:\/\/[^\s"')]+$/i.test(link) ? link : null;
 }
