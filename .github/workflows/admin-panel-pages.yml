@@ -26,14 +26,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: admin-panel/package-lock.json
+
       - run: npm ci
         working-directory: admin-panel
+
       - run: npm run build
         working-directory: admin-panel
         env:
@@ -41,8 +44,10 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_FRIENDCONNECT_BOT_ID: ${{ vars.NEXT_PUBLIC_FRIENDCONNECT_BOT_ID || 'fracture-main' }}
           NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH || format('/{0}', github.event.repository.name) }}
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: admin-panel/out
+
       - id: deployment
         uses: actions/deploy-pages@v5
