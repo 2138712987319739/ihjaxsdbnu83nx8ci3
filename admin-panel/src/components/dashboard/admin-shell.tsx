@@ -39,6 +39,10 @@ function AdminShellContent() {
     fontFamily: getFontStack(data.config.panelFont),
   }) as CSSProperties, [data.config.panelFont, data.config.primaryColor, data.config.secondaryColor]);
 
+  if (!configured) {
+    return <SetupRequired />;
+  }
+
   if (!loading && configured && user && profile && !profile.passwordSetAt) {
     return <LoginPanel mode="setup-password" userEmail={profile.email || user.email || ''} />;
   }
@@ -163,6 +167,32 @@ function AccessDenied({ email }: { email: string }) {
             <LockKeyhole size={16} />
             Sign out
           </Button>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+function SetupRequired() {
+  return (
+    <main className="grid min-h-screen place-items-center px-4">
+      <Card className="w-full max-w-lg">
+        <CardHeader>
+          <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-md border border-blue-300/30 bg-blue-500/16 text-blue-200">
+            <LockKeyhole size={21} />
+          </div>
+          <CardTitle>Supabase Setup Required</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Add the public Supabase URL and anon key to the GitHub repository variables, then rerun the Pages workflow.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-border bg-white/5 px-3 py-2">
+            Required variables: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
+          </div>
+          <div className="rounded-md border border-border bg-white/5 px-3 py-2">
+            After the database migration is applied, the first signed-in account becomes the owner.
+          </div>
         </CardContent>
       </Card>
     </main>
