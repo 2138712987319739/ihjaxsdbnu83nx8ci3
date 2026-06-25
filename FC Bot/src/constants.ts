@@ -11,6 +11,7 @@ export const ACTION_RATE_LIMITS: Record<string, { windowMs: number; max: number 
   block_xuid: { windowMs: 60000, max: 12 },
   clear_invite_cooldown: { windowMs: 60000, max: 10 },
   clear_stale_actions: { windowMs: 60000, max: 8 },
+  create_admin_account: { windowMs: 60000, max: 4 },
   disable_lockdown: { windowMs: 60000, max: 4 },
   enable_lockdown: { windowMs: 60000, max: 4 },
   invite_admin_user: { windowMs: 60000, max: 4 },

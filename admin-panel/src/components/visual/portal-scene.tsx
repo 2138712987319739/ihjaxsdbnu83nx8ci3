@@ -71,8 +71,8 @@ export function PortalScene({ online }: { online: boolean }) {
     >
       <ambientLight intensity={1.05} />
       <directionalLight position={[3.4, 4.2, 4]} intensity={1.5} color="#dbeafe" />
-      <pointLight position={[-3.8, -2.1, 2.4]} intensity={1.9} color="#ff3f5f" />
-      <pointLight position={[4.2, 1.8, 2.8]} intensity={2.05} color="#2777ff" />
+      <pointLight position={[-3.8, -2.1, 2.4]} intensity={2.15} color="#ff315d" />
+      <pointLight position={[4.2, 1.8, 2.8]} intensity={2.35} color="#1f7aff" />
       <FmcMark online={online} pulses={pulses} reducedMotion={reducedMotion} />
     </Canvas>
   );
@@ -81,7 +81,7 @@ export function PortalScene({ online }: { online: boolean }) {
 function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: Pulse[]; reducedMotion: boolean }) {
   const groupRef = useRef<Group>(null);
   const pointer = useRef({ x: 0, y: 0 });
-  const origin = useMemo(() => ({ x: 1.05, y: -0.16, z: -2.55 }), []);
+  const origin = useMemo(() => ({ x: 1.92, y: -0.04, z: -2.8 }), []);
 
   useEffect(() => {
     if (reducedMotion) {
@@ -117,7 +117,7 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
   });
 
   return (
-    <group ref={groupRef} position={[origin.x, origin.y, origin.z]} rotation={[0, -0.12, 0]} scale={[1.35, 1.35, 1.35]}>
+    <group ref={groupRef} position={[origin.x, origin.y, origin.z]} rotation={[0, -0.12, 0]} scale={[0.92, 0.92, 0.92]}>
       <Text
         anchorX="center"
         anchorY="middle"
@@ -127,12 +127,12 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
       >
         FMC
         <meshStandardMaterial
-          color={online ? '#f2f6ff' : '#a9b4c7'}
-          emissive={online ? '#1d2b44' : '#0b111d'}
+          color={online ? '#8fc4ff' : '#617797'}
+          emissive={online ? '#153b84' : '#07162c'}
           metalness={0.18}
           roughness={0.34}
           transparent
-          opacity={online ? 0.36 : 0.28}
+          opacity={online ? 0.24 : 0.16}
         />
       </Text>
       <Text
@@ -143,7 +143,7 @@ function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: P
         position={[0.02, -1.78, 0.06]}
       >
         FRACTURE MC
-        <meshBasicMaterial color={online ? '#8fb7ff' : '#64748b'} transparent opacity={0.46} />
+        <meshBasicMaterial color={online ? '#ff7f9a' : '#64748b'} transparent opacity={0.34} />
       </Text>
       <LogoSkeleton online={online} />
       {pulses.map((pulse) => (
@@ -176,7 +176,7 @@ function StaticSegment({ start, end, online }: { start: Point; end: Point; onlin
   return (
     <mesh position={segment.center} rotation={[0, 0, segment.angle]} scale={[segment.length, 1, 1]}>
       <boxGeometry args={[1, 0.012, 0.012]} />
-      <meshBasicMaterial color={online ? '#f8fafc' : '#b8c1d1'} transparent opacity={online ? 0.12 : 0.08} />
+      <meshBasicMaterial color={online ? '#ff9db0' : '#6f83a5'} transparent opacity={online ? 0.10 : 0.06} />
     </mesh>
   );
 }

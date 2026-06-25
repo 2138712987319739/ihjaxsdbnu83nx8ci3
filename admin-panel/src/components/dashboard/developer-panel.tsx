@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createActor } from 'xstate';
 import { createColumnHelper, flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
-import { Ban, Bug, CheckCircle2, Hammer, LockKeyhole, MailPlus, Play, Radar, ShieldAlert, TerminalSquare, UnlockKeyhole, UsersRound } from 'lucide-react';
+import { Ban, Bug, CheckCircle2, Hammer, KeyRound, LockKeyhole, MailPlus, Play, Radar, ShieldAlert, TerminalSquare, UnlockKeyhole, UserPlus, UsersRound } from 'lucide-react';
 import type { AdminPermission, AdminRole, AdminUser, BotAction, BotError, BotEvent, DashboardData, FixLog, PlayerSession, SecurityEvent } from '@/types/admin';
 import type { BotActionType } from '@/lib/actions';
 import { ActivityChart } from '@/components/dashboard/activity-chart';
@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { inviteAdminUser, queueBotAction } from '@/lib/actions';
+import { createAdminAccount, queueBotAction } from '@/lib/actions';
 import { formatDate } from '@/lib/utils';
 import { getDefenseSignal, securityMachine } from '@/store/security-machine';
 
@@ -61,6 +61,8 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<AdminRole>('operator');
   const [invitePermissions, setInvitePermissions] = useState<AdminPermission[]>(['actions:write']);
+  const [accountCredential, setAccountCredential] = useState('');
+  const [accountCredentialConfirm, setAccountCredentialConfirm] = useState('');
   const [message, setMessage] = useState('');
   const securityActor = useMemo(() => createActor(securityMachine), []);
   const [defenseState, setDefenseState] = useState(String(securityActor.getSnapshot().value));
@@ -125,9 +127,9 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
     setBlockXuid('');
   }
 
-  async function sendAdminInvite() {
+  async function createAccount() {
     if (!configured) {
-      setMessage('Connect Supabase before inviting admins.');
+      setMessage('Connect Supabase before creating admin accounts.');
       return;
     }
 
@@ -137,22 +139,29 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
     }
 
     if (!bridgeReady) {
-      setMessage('Bot bridge is offline or stale. Start the Node server before sending admin invites.');
+      setMessage('Bot bridge is offline or stale. Start the Node server before creating admin accounts.');
+      return;
+    }
+
+    if (accountCredential !== accountCredentialConfirm) {
+      setMessage('Passwords do not match.');
       return;
     }
 
     try {
       const email = inviteEmail.trim().toLowerCase();
-      await inviteAdminUser({
+      await createAdminAccount({
         email,
+        credential: accountCredential,
         role: inviteRole,
         permissions: inviteRole === 'owner' ? ['config:write', 'actions:write', 'users:write', 'security:write'] : invitePermissions,
-        redirectTo: window.location.origin + window.location.pathname,
       });
       setInviteEmail('');
-      setMessage(`Invite queued for ${email}. Check Actions for the sent or failed result.`);
+      setAccountCredential('');
+      setAccountCredentialConfirm('');
+      setMessage(`Account creation queued for ${email}. Check Actions for the result.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Invite failed.');
+      setMessage(error instanceof Error ? error.message : 'Account creation failed.');
     }
   }
 
@@ -274,20 +283,24 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
 
             <TabsContent value="users">
               <div className="grid gap-4 xl:grid-cols-[0.86fr_1.14fr]">
-                <section className="rounded-lg border border-border bg-black/24 p-3">
+                <section className="liquid-control rounded-lg p-3">
                   <div className="flex items-center gap-2 font-semibold">
-                    <MailPlus size={18} className="text-blue-200" />
-                    Invite Admin
+                    <UserPlus size={18} className="text-blue-200" />
+                    Create Account
                   </div>
                   <div className="mt-3 grid gap-3">
                     {!bridgeReady ? (
                       <div className="rounded-md border border-yellow-300/25 bg-yellow-400/10 px-3 py-2 text-xs text-yellow-100">
-                        The bot bridge is not reporting. Start the Node server before sending account invitations.
+                        The bot bridge is not reporting. Start the Node server before creating admin accounts.
                       </div>
                     ) : null}
                     <Input type="email" value={inviteEmail} placeholder="operator@fracturemc.com" onChange={(event) => setInviteEmail(event.target.value)} />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input type="password" value={accountCredential} placeholder="Password" onChange={(event) => setAccountCredential(event.target.value)} />
+                      <Input type="password" value={accountCredentialConfirm} placeholder="Confirm password" onChange={(event) => setAccountCredentialConfirm(event.target.value)} />
+                    </div>
                     <select
-                      className="h-9 rounded-md border border-input bg-black/20 px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                      className="liquid-control h-9 rounded-md px-3 text-sm outline-none focus:border-blue-300/60 focus:ring-2 focus:ring-blue-400/30"
                       value={inviteRole}
                       onChange={(event) => setInviteRole(event.target.value as AdminRole)}
                     >
@@ -297,7 +310,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                     </select>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {permissionOptions.map(([permission, label]) => (
-                        <label key={permission} className="flex min-h-11 items-center gap-2 rounded-md border border-border bg-white/5 px-3 text-sm">
+                        <label key={permission} className="liquid-control flex min-h-11 items-center gap-2 rounded-md px-3 text-sm">
                           <input
                             type="checkbox"
                             checked={inviteRole === 'owner' || invitePermissions.includes(permission)}
@@ -308,19 +321,19 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                         </label>
                       ))}
                     </div>
-                    <Button onClick={() => void sendAdminInvite()} disabled={!canManageUsers || !bridgeReady || !inviteEmail.includes('@')}>
-                      <MailPlus size={16} />
-                      {bridgeReady ? 'Queue invite' : 'Bridge offline'}
+                    <Button onClick={() => void createAccount()} disabled={!canManageUsers || !bridgeReady || !inviteEmail.includes('@') || accountCredential.length < 12 || accountCredential !== accountCredentialConfirm}>
+                      <KeyRound size={16} />
+                      {bridgeReady ? 'Create account' : 'Bridge offline'}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      Invites are sent by the running bot bridge. If Supabase email is rate-limited, configure SMTP on the Node server or use the generated link in Actions.
+                      Creates a confirmed login through the running bot bridge. Use the exact email and password here to sign in after the action completes.
                     </p>
                   </div>
                 </section>
                 <section className="min-w-0">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                     <UsersRound size={17} className="text-blue-200" />
-                    Active and invited accounts
+                    Active accounts
                   </div>
                   <DataTable data={data.adminUsers} columns={adminUserColumns} empty="No admin users recorded." />
                 </section>

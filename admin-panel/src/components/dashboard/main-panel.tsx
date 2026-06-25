@@ -267,7 +267,7 @@ export function MainPanel({ data, configured }: MainPanelProps) {
           </div>
 
           <motion.div
-            className="rounded-lg border border-border bg-black/28 p-3"
+            className="liquid-control rounded-lg p-3"
             animate={{ borderColor: formState.isDirty ? 'rgba(39,119,255,0.72)' : 'rgba(148,163,184,0.22)' }}
           >
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -291,7 +291,7 @@ export function MainPanel({ data, configured }: MainPanelProps) {
 
 function PanelBlock({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <section className="grid gap-3 rounded-lg border border-border bg-black/20 p-3">
+    <section className="liquid-control grid gap-3 rounded-lg p-3">
       <div className="flex items-center gap-2 text-sm font-semibold">
         <span className="text-blue-200">{icon}</span>
         {title}
@@ -325,7 +325,7 @@ function ListField({ label, error, value, onChange }: { label: string; error?: s
 
 function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="flex min-h-10 items-center justify-between gap-3 rounded-md border border-border bg-white/5 px-3 text-sm">
+    <label className="liquid-control flex min-h-10 items-center justify-between gap-3 rounded-md px-3 text-sm">
       <span>{label}</span>
       <input
         className="h-4 w-4 accent-blue-500"
@@ -339,7 +339,7 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
 
 function PreviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/5 px-3 py-2">
+    <div className="liquid-control flex items-center justify-between gap-3 rounded-md px-3 py-2">
       <span className="text-muted-foreground">{label}</span>
       <span className="min-w-0 truncate font-mono text-xs text-foreground">{value}</span>
     </div>

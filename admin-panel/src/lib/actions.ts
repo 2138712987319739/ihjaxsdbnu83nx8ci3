@@ -9,6 +9,7 @@ export type BotActionType =
   | 'block_xuid'
   | 'clear_invite_cooldown'
   | 'clear_stale_actions'
+  | 'create_admin_account'
   | 'disable_lockdown'
   | 'enable_lockdown'
   | 'invite_admin_user'
@@ -63,6 +64,30 @@ export async function inviteAdminUser(input: {
     role: input.role,
     permissions: input.permissions,
     redirectTo: input.redirectTo,
+  });
+}
+
+export async function createAdminAccount(input: {
+  email: string;
+  credential: string;
+  role: AdminRole;
+  permissions: AdminPermission[];
+}) {
+  const email = input.email.trim().toLowerCase();
+  const credential = input.credential.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Enter a valid email address.');
+  }
+
+  if (credential.length < 12) {
+    throw new Error('Use a password with at least 12 characters.');
+  }
+
+  await queueBotAction('create_admin_account', {
+    email,
+    credential,
+    role: input.role,
+    permissions: input.permissions,
   });
 }
 

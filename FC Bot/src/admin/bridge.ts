@@ -19,6 +19,7 @@ import { sendAdminInviteEmail } from './mailer';
 type ActionUpdate = {
   status: 'running' | 'completed' | 'failed';
   completed_at?: string;
+  payload?: unknown;
   result?: AdminActionResult;
 };
 
@@ -28,6 +29,7 @@ const supportedActions = new Set<AdminActionType>([
   'block_xuid',
   'clear_invite_cooldown',
   'clear_stale_actions',
+  'create_admin_account',
   'disable_lockdown',
   'enable_lockdown',
   'invite_admin_user',
@@ -222,7 +224,10 @@ export class AdminBridge implements AdminEventSink {
   }
 
   private async processAction(action: AdminActionRow): Promise<void> {
-    await this.updateAction(action.id, { status: 'running' });
+    await this.updateAction(action.id, {
+      status: 'running',
+      ...(action.action_type === 'create_admin_account' ? { payload: sanitizeAccountCreationPayload(action.payload) } : {}),
+    });
 
     const result = await this.executeAction(action)
       .catch((error: unknown): AdminActionResult => ({
@@ -268,6 +273,10 @@ export class AdminBridge implements AdminEventSink {
 
     if (action.action_type === 'invite_admin_user') {
       return this.inviteAdminUser(action);
+    }
+
+    if (action.action_type === 'create_admin_account') {
+      return this.createAdminAccount(action);
     }
 
     return this.controller.performAdminAction(action.action_type, action.payload);
@@ -399,6 +408,92 @@ export class AdminBridge implements AdminEventSink {
     });
 
     return { ok: true, message: `Invite sent to ${email}.`, data: { role, permissions } };
+  }
+
+  private async createAdminAccount(action: AdminActionRow): Promise<AdminActionResult> {
+    if (!action.created_by) {
+      return { ok: false, message: 'Missing operator identity.' };
+    }
+
+    const permitted = await this.operatorCanManageUsers(action.created_by);
+    if (!permitted) {
+      await this.persistSecurityEvent('warning', 'admin_create_denied', 'Admin account creation denied by permission check.', {
+        createdBy: action.created_by,
+      });
+      return { ok: false, message: 'Admin users permission is required.' };
+    }
+
+    const email = readPayloadString(action.payload, 'email')?.toLowerCase();
+    const credential = readPayloadString(action.payload, 'credential');
+    const role = readAdminRole(action.payload);
+    const permissions = readPermissionList(action.payload, role);
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { ok: false, message: 'Invalid admin email.' };
+    }
+
+    if (!credential || credential.length < 12) {
+      return { ok: false, message: 'Password must be at least 12 characters.' };
+    }
+
+    const existingProfile = await this.client
+      .from('admin_users')
+      .select('user_id, disabled_at')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (existingProfile.error) {
+      return { ok: false, message: existingProfile.error.message };
+    }
+
+    if (existingProfile.data && !existingProfile.data.disabled_at) {
+      return { ok: false, message: 'An active admin account already exists for this email.' };
+    }
+
+    const { data, error } = await this.client.auth.admin.createUser({
+      email,
+      ['password']: credential,
+      email_confirm: true,
+      user_metadata: {
+        panel: 'friendconnect',
+        botId: this.config.botId,
+        role,
+      },
+    });
+
+    if (error || !data.user?.id) {
+      await this.persistSecurityEvent('warning', 'admin_create_failed', 'Admin account creation failed.', {
+        email,
+        reason: error?.message ?? 'Supabase did not return a user id.',
+        createdBy: action.created_by,
+      });
+      return { ok: false, message: error?.message ?? 'Supabase did not return a user id.' };
+    }
+
+    const now = new Date().toISOString();
+    const { error: profileError } = await this.client.from('admin_users').upsert({
+      user_id: data.user.id,
+      email,
+      role,
+      permissions,
+      invited_by: action.created_by,
+      invited_at: now,
+      accepted_at: now,
+      password_set_at: now,
+      disabled_at: null,
+    }, { onConflict: 'user_id' });
+
+    if (profileError) {
+      return { ok: false, message: profileError.message };
+    }
+
+    await this.persistSecurityEvent('info', 'admin_account_created', 'Admin account created without email verification.', {
+      email,
+      role,
+      createdBy: action.created_by,
+    });
+
+    return { ok: true, message: `Admin account created for ${email}.`, data: { role, permissions } };
   }
 
   private async generateManualAdminInviteLink(
@@ -589,6 +684,20 @@ function readPayloadString(payload: unknown, key: string): string | null {
 
   const value = (payload as Record<string, unknown>)[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function sanitizeAccountCreationPayload(payload: unknown): Record<string, unknown> {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return {};
+  }
+
+  const safePayload = { ...(payload as Record<string, unknown>) };
+  delete safePayload.credential;
+  delete safePayload.credentialConfirm;
+  return {
+    ...safePayload,
+    credential: '[removed]',
+  };
 }
 
 function readAdminRole(payload: unknown): 'admin' | 'operator' | 'viewer' {

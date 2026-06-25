@@ -6,6 +6,7 @@ export type AdminActionType =
   | 'block_xuid'
   | 'clear_invite_cooldown'
   | 'clear_stale_actions'
+  | 'create_admin_account'
   | 'disable_lockdown'
   | 'enable_lockdown'
   | 'invite_admin_user'

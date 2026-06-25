@@ -11,6 +11,7 @@ export function StatusCards({ data }: { data: DashboardData }) {
       hint: data.status.online ? 'Portal session active' : 'Awaiting fresh bot heartbeat',
       icon: Users,
       accent: 'text-blue-200',
+      wash: 'from-blue-500/22 to-blue-500/4',
     },
     {
       label: 'Joined through bot',
@@ -18,6 +19,7 @@ export function StatusCards({ data }: { data: DashboardData }) {
       hint: 'Recorded by bridge',
       icon: LogIn,
       accent: 'text-red-200',
+      wash: 'from-red-500/22 to-red-500/4',
     },
     {
       label: 'Target',
@@ -25,6 +27,7 @@ export function StatusCards({ data }: { data: DashboardData }) {
       hint: data.status.joinability,
       icon: Activity,
       accent: 'text-blue-200',
+      wash: 'from-blue-500/22 to-blue-500/4',
     },
     {
       label: 'Heartbeat',
@@ -32,6 +35,7 @@ export function StatusCards({ data }: { data: DashboardData }) {
       hint: data.status.heartbeatFresh ? 'Bridge reporting' : 'No recent signal',
       icon: Clock,
       accent: 'text-red-200',
+      wash: 'from-red-500/22 to-red-500/4',
     },
   ];
 
@@ -40,9 +44,9 @@ export function StatusCards({ data }: { data: DashboardData }) {
       {items.map((item) => {
         const Icon = item.icon;
         return (
-          <Card key={item.label} className="signal-line overflow-hidden">
+          <Card key={item.label} className={`signal-line overflow-hidden bg-gradient-to-br ${item.wash}`}>
             <CardContent className="flex items-center gap-3 p-4 pl-5">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-md bg-white/8 ${item.accent}`}>
+              <div className={`liquid-control flex h-11 w-11 items-center justify-center rounded-md ${item.accent}`}>
                 <Icon size={20} />
               </div>
               <div className="min-w-0">

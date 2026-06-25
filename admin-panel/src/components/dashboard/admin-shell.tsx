@@ -66,13 +66,13 @@ function AdminShellContent() {
       </div>
 
       <div className="relative z-10 mx-auto flex max-w-[1480px] flex-col gap-3">
-        <header className="command-header grid gap-3 rounded-lg p-3 backdrop-blur-xl lg:grid-cols-[1fr_auto] lg:items-center">
+        <header className="command-header grid gap-3 rounded-lg p-3 lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               {brandingImage ? (
                 <span
                   aria-hidden="true"
-                  className="h-9 w-9 rounded-md border border-border bg-cover bg-center"
+                  className="liquid-control h-10 w-10 rounded-md bg-cover bg-center"
                   style={{ backgroundImage: `url("${brandingImage}")` }}
                 />
               ) : null}
@@ -140,7 +140,7 @@ function AdminShellContent() {
           )}
         </AnimatePresence>
 
-        <footer className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-black/24 px-4 py-3 text-xs text-muted-foreground">
+        <footer className="liquid-control flex flex-wrap items-center gap-2 rounded-lg px-4 py-3 text-xs text-muted-foreground">
           <ShieldCheck size={14} />
           Private dashboard. Actions are queued and validated by the running bot process.
           <span className="hidden sm:inline">·</span>
@@ -165,7 +165,7 @@ function AccessDenied({ email }: { email: string }) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="rounded-md border border-border bg-white/5 px-3 py-2 text-sm text-muted-foreground">
-            Ask an owner to invite this email from Developer → Admin Users.
+            Ask an owner to create this email from Developer → Admin Users.
           </div>
           <Button className="w-full" variant="outline" onClick={() => void getSupabaseClient()?.auth.signOut()}>
             <LockKeyhole size={16} />
