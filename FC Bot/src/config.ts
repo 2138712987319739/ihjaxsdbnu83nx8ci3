@@ -33,7 +33,7 @@ export type RuntimeConfig = {
   friendAddIntervalMs: number;
   friendRemoveIntervalMs: number;
   inviteCooldownMs: number;
-  keepaliveIntervalMs: number;
+  sessionKeepaliveIntervalMs: number;
   logLevel: LogLevel;
   admin: AdminBridgeConfig;
 };
@@ -45,19 +45,6 @@ export type AdminBridgeConfig = {
   botId: string;
   pollIntervalMs: number;
   statusIntervalMs: number;
-  inviteMailer: AdminInviteMailerConfig;
-};
-
-export type AdminInviteMailerConfig = {
-  enabled: boolean;
-  host: string | null;
-  port: number;
-  secure: boolean;
-  user: string | null;
-  pass: string | null;
-  from: string | null;
-  fromName: string;
-  replyTo: string | null;
 };
 
 export type RemoteConfigPatch = Partial<Omit<RuntimeConfig, 'admin' | 'authCacheDir' | 'logLevel'>>;
@@ -68,13 +55,13 @@ const defaults = {
   botUsername: 'FractureMC',
   authCacheDir: '.runtime/auth',
   joinability: 'friendsOnly',
-  useBrandColors: 'false',
-  worldHostName: 'FractureMC',
-  worldName: 'FractureMC',
+  useBrandColors: 'true',
+  worldHostName: 'Fracture MC',
+  worldName: 'Fracture MC | play.fracturemc.com',
   worldVersion: 'Crossplay Portal',
   updatePresence: 'true',
   worldMaxPlayers: '100',
-  autoFriendAcceptEnabled: 'true',
+  autoFriendAcceptEnabled: 'false',
   autoFriendAddEnabled: 'true',
   autoInviteOnFriendAdded: 'true',
   friendPolicy: 'open',
@@ -87,7 +74,7 @@ const defaults = {
   friendAddIntervalMs: '5000',
   friendRemoveIntervalMs: '2500',
   inviteCooldownMs: '90000',
-  keepaliveIntervalMs: '300000',
+  sessionKeepaliveIntervalMs: '120000',
   logLevel: 'info',
   adminEnabled: '',
   adminSupabaseUrl: '',
@@ -95,16 +82,13 @@ const defaults = {
   adminBotId: 'fracture-main',
   adminPollIntervalMs: '5000',
   adminStatusIntervalMs: '10000',
-  adminInviteSmtpHost: '',
-  adminInviteSmtpPort: '587',
-  adminInviteSmtpSecure: 'false',
-  adminInviteSmtpUser: '',
-  adminInviteSmtpPass: '',
-  adminInviteFrom: '',
-  adminInviteFromName: 'Fracture MC',
-  adminInviteReplyTo: '',
 } as const;
 
+/**
+ * Load environment variables from a .env file
+ * Uses the dotenv library for better compatibility and edge case handling
+ * @param path - Path to the .env file (defaults to .env in current directory)
+ */
 export function loadEnvFile(path = resolve(process.cwd(), '.env')): void {
   if (!existsSync(path)) {
     return;
@@ -143,7 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     friendAddIntervalMs: readInteger(env, 'FRACTURE_FRIEND_ADD_INTERVAL_MS', defaults.friendAddIntervalMs, 1000, 600000),
     friendRemoveIntervalMs: readInteger(env, 'FRACTURE_FRIEND_REMOVE_INTERVAL_MS', defaults.friendRemoveIntervalMs, 1000, 600000),
     inviteCooldownMs: readInteger(env, 'FRACTURE_INVITE_COOLDOWN_MS', defaults.inviteCooldownMs, 10000, 3600000),
-    keepaliveIntervalMs: readInteger(env, 'FRACTURE_KEEPALIVE_INTERVAL_MS', defaults.keepaliveIntervalMs, 120000, 300000),
+    sessionKeepaliveIntervalMs: readInteger(env, 'FRACTURE_SESSION_KEEPALIVE_INTERVAL_MS', defaults.sessionKeepaliveIntervalMs, 120000, 300000),
     logLevel: readLogLevel(env, 'LOG_LEVEL', defaults.logLevel),
     admin,
   };
@@ -248,8 +232,8 @@ export function normalizeRemoteConfigPatch(input: unknown): RemoteConfigPatch {
     patch.inviteCooldownMs = readIntegerValue(input.inviteCooldownMs, 'inviteCooldownMs', 10000, 3600000);
   }
 
-  if ('keepaliveIntervalMs' in input) {
-    patch.keepaliveIntervalMs = readIntegerValue(input.keepaliveIntervalMs, 'keepaliveIntervalMs', 120000, 300000);
+  if ('sessionKeepaliveIntervalMs' in input) {
+    patch.sessionKeepaliveIntervalMs = readIntegerValue(input.sessionKeepaliveIntervalMs, 'sessionKeepaliveIntervalMs', 120000, 300000);
   }
 
   return patch;
@@ -267,15 +251,22 @@ function readNonEmpty(env: NodeJS.ProcessEnv, key: string, fallback: string): st
   return value;
 }
 
+/**
+ * Read and validate a file system path from environment
+ * Prevents directory traversal and null byte injection
+ */
 function readPath(env: NodeJS.ProcessEnv, key: string, fallback: string): string {
   const value = readNonEmpty(env, key, fallback);
-
+  
+  // Prevent null byte injection
   if (value.includes('\0')) {
     throw new Error(`${key} contains an invalid path character`);
   }
-
+  
+  // Normalize and resolve the path
   const resolvedPath = isAbsolute(value) ? normalize(value) : resolve(process.cwd(), value);
-
+  
+  // Prevent directory traversal outside of current working directory for relative paths
   if (!isAbsolute(value)) {
     const cwd = process.cwd();
     if (!resolvedPath.startsWith(cwd)) {
@@ -360,51 +351,12 @@ function readAdminConfig(env: NodeJS.ProcessEnv): AdminBridgeConfig {
     botId: readNonEmpty(env, 'FRIENDCONNECT_ADMIN_BOT_ID', defaults.adminBotId),
     pollIntervalMs: readInteger(env, 'FRIENDCONNECT_ADMIN_POLL_INTERVAL_MS', defaults.adminPollIntervalMs, 1000, 600000),
     statusIntervalMs: readInteger(env, 'FRIENDCONNECT_ADMIN_STATUS_INTERVAL_MS', defaults.adminStatusIntervalMs, 1000, 600000),
-    inviteMailer: readAdminInviteMailerConfig(env),
-  };
-}
-
-function readAdminInviteMailerConfig(env: NodeJS.ProcessEnv): AdminInviteMailerConfig {
-  const host = readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_HOST', defaults.adminInviteSmtpHost);
-  const user = readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_USER', defaults.adminInviteSmtpUser);
-  const pass = readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_PASS', defaults.adminInviteSmtpPass);
-  const from = readOptionalEmail(env, 'FRIENDCONNECT_ADMIN_INVITE_FROM', defaults.adminInviteFrom);
-  const replyTo = readOptionalEmail(env, 'FRIENDCONNECT_ADMIN_INVITE_REPLY_TO', defaults.adminInviteReplyTo);
-  const enabled = Boolean(host || user || pass || from);
-
-  if (enabled && (!host || !user || !pass || !from)) {
-    throw new Error('Admin invite SMTP requires FRIENDCONNECT_ADMIN_INVITE_SMTP_HOST, FRIENDCONNECT_ADMIN_INVITE_SMTP_USER, FRIENDCONNECT_ADMIN_INVITE_SMTP_PASS, and FRIENDCONNECT_ADMIN_INVITE_FROM');
-  }
-
-  return {
-    enabled,
-    host,
-    port: readInteger(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_PORT', defaults.adminInviteSmtpPort, 1, 65535),
-    secure: readBoolean(env, 'FRIENDCONNECT_ADMIN_INVITE_SMTP_SECURE', defaults.adminInviteSmtpSecure),
-    user,
-    pass,
-    from,
-    fromName: readDisplayText(env, 'FRIENDCONNECT_ADMIN_INVITE_FROM_NAME', defaults.adminInviteFromName, 80),
-    replyTo,
   };
 }
 
 function readOptional(env: NodeJS.ProcessEnv, key: string, fallback: string): string | null {
   const value = readEnv(env, key, fallback);
   return value ? value : null;
-}
-
-function readOptionalEmail(env: NodeJS.ProcessEnv, key: string, fallback: string): string | null {
-  const value = readOptional(env, key, fallback);
-  if (!value) {
-    return null;
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-    throw new Error(`${key} must be a valid email address`);
-  }
-
-  return value;
 }
 
 function readStringValue(value: unknown, key: string): string {
@@ -478,6 +430,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Normalize and validate a list of values
+ * @param value - Comma-separated string or array of values
+ * @param key - Configuration key name (for error messages)
+ * @param validator - Function to validate each entry
+ * @returns Deduplicated array of validated entries
+ */
 function normalizeList(
   value: string | unknown[],
   key: string,
@@ -499,6 +458,8 @@ function normalizeList(
     normalized.add(validator(entry, key));
   }
 
+  // Enforce maximum list size to prevent excessive memory usage
+  // and ensure reasonable performance for filtering operations
   if (normalized.size > MAX_LIST_ENTRIES) {
     throw new Error(`${key} cannot contain more than ${MAX_LIST_ENTRIES} entries`);
   }
@@ -513,10 +474,6 @@ function validateDisplayText(value: string, key: string, maxLength: number): str
 
   if (hasControlCharacter(value)) {
     throw new Error(`${key} contains a control character`);
-  }
-
-  if (/\u00a7[0-9A-FK-OR]/i.test(value)) {
-    throw new Error(`${key} cannot contain Minecraft formatting codes`);
   }
 
   return value;

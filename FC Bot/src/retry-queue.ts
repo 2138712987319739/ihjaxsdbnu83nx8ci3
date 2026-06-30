@@ -24,6 +24,7 @@ export class RetryQueue<T> {
     private readonly config: RetryConfig,
     private readonly processor: (item: T) => Promise<void>,
     private readonly logger: Logger,
+    private readonly queueName = 'Retry queue',
     private readonly checkIntervalMs = 5000,
   ) {}
 
@@ -53,16 +54,19 @@ export class RetryQueue<T> {
 
     this.running = true;
     this.timer = setInterval(() => void this.processQueue(), this.checkIntervalMs);
-    this.logger.info('Retry queue started');
+    this.logger.info(`${this.queueName} started`);
   }
 
     stop(): void {
+    const wasRunning = this.running || this.timer !== null;
     this.running = false;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.logger.info('Retry queue stopped', { remainingItems: this.queue.size });
+    if (wasRunning) {
+      this.logger.info(`${this.queueName} stopped`, { remainingItems: this.queue.size });
+    }
   }
 
     size(): number {
@@ -129,4 +133,3 @@ export class RetryQueue<T> {
     }
   }
 }
-

@@ -15,6 +15,9 @@ import { normalizeRemoteConfigPatch } from './config';
 import { RetryQueue } from './retry-queue';
 import { UNSUPPORTED_ACTION_MESSAGE } from './constants';
 
+/**
+ * Data structure for queued invite retry
+ */
 type InviteRetryData = {
   xuid: string;
   gamertag: string;
@@ -26,15 +29,61 @@ const joinabilityMap: Record<RuntimeConfig['joinability'], Joinability> = {
   friendsOfFriends: Joinability.FriendsOfFriends,
 };
 
+const SESSION_KEEPALIVE_MIN_MEMBER_COUNT = 1;
+const SESSION_INITIALIZATION_ERROR_TEXT = 'member initialization requiring at least 1 members to start';
+const SESSION_STALE_ERROR_TEXT = 'session is configured for member initialization';
+
+type SessionMemberUpdate = {
+  members: {
+    me: {
+      constants: {
+        system: {
+          xuid: string;
+          initialize: true;
+        };
+      };
+      properties: {
+        system: {
+          active: true;
+          connection?: string;
+          subscription?: {
+            id: string;
+            changeTypes: ['everything'];
+          };
+        };
+      };
+    };
+  };
+};
+
+type PortalRestRuntime = {
+  updateConnection(sessionName: string, connectionId: string): Promise<void>;
+  updateSession(sessionName: string, payload: SessionMemberUpdate): Promise<unknown>;
+  leaveSession(sessionName: string): Promise<void>;
+  setActivity(sessionName: string): Promise<unknown>;
+};
+
+type PortalHostRuntime = {
+  rest: PortalRestRuntime;
+  profile: { xuid?: string } | null;
+  subscriptionId?: string;
+};
+
+export function isXboxSessionInitializationError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes(SESSION_INITIALIZATION_ERROR_TEXT) || message.includes(SESSION_STALE_ERROR_TEXT);
+}
+
 export class FriendConnectService implements AdminServiceController {
   private portal: BedrockPortal | null = null;
   private inviteCache: InviteCache;
   private inviteRetryQueue: RetryQueue<InviteRetryData>;
   private eventSink: AdminEventSink | null = null;
   private startedAt: string | null = null;
-  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
-  private recoveryPromise: Promise<void> | null = null;
   private totalJoins = 0;
+  private keepaliveTimer: NodeJS.Timeout | null = null;
+  private keepaliveInFlight = false;
+  private restartPromise: Promise<void> | null = null;
 
   constructor(
     private config: RuntimeConfig,
@@ -44,12 +93,13 @@ export class FriendConnectService implements AdminServiceController {
     this.inviteRetryQueue = new RetryQueue<InviteRetryData>(
       {
         maxRetries: 3,
-        initialDelayMs: 5000,
-        maxDelayMs: 60000,
+        initialDelayMs: 30000, // 30 seconds
+        maxDelayMs: 300000, // 5 minutes
         backoffMultiplier: 2,
       },
       (data) => this.retryInvite(data),
       logger,
+      'Invite retry queue',
     );
   }
 
@@ -74,7 +124,7 @@ export class FriendConnectService implements AdminServiceController {
     try {
       await portal.start();
       this.inviteRetryQueue.start();
-      this.startKeepalive();
+      this.startSessionKeepalive();
       this.startedAt = new Date().toISOString();
       this.recordEvent({
         type: 'startup',
@@ -84,7 +134,6 @@ export class FriendConnectService implements AdminServiceController {
     } catch (error) {
       this.portal = null;
       this.inviteRetryQueue.stop();
-      this.stopKeepalive();
       await portal.end().catch((shutdownError: unknown) => {
         this.logger.warn('Portal cleanup after startup failure failed', {
           error: getErrorMessage(shutdownError),
@@ -95,9 +144,10 @@ export class FriendConnectService implements AdminServiceController {
   }
 
   async stop(): Promise<void> {
+    this.stopSessionKeepalive();
+
     const portal = this.portal;
     this.portal = null;
-    this.stopKeepalive();
 
     if (!portal) {
       return;
@@ -110,15 +160,6 @@ export class FriendConnectService implements AdminServiceController {
     });
     this.startedAt = null;
     this.recordEvent({ type: 'shutdown', message: 'Friend connect service stopped.' });
-  }
-
-  handleRuntimeRejection(reason: unknown): boolean {
-    if (!isXboxSessionInitializationError(reason)) {
-      return false;
-    }
-
-    void this.recoverPortal('Xbox session became stale.', reason).catch(() => undefined);
-    return true;
   }
 
   getStatusSnapshot(botId: string): ServiceStatusSnapshot {
@@ -147,20 +188,19 @@ export class FriendConnectService implements AdminServiceController {
       case 'clear_invite_cooldown':
         this.inviteCache.clear();
         return { ok: true, message: 'Invite cooldown cache cleared.' };
+      case 'keepalive':
+        return this.runKeepaliveAction();
       case 'disable_lockdown':
         return this.applyRemoteConfig({ lockdownMode: false });
       case 'enable_lockdown':
         return this.applyRemoteConfig({ lockdownMode: true });
-      case 'keepalive_ping':
-        return this.keepSessionAlive('admin_panel');
       case 'reconnect_portal':
         await this.restartPortal();
         return { ok: true, message: 'Portal reconnected.' };
       case 'reload_config':
         return { ok: true, message: 'Runtime config snapshot refreshed.' };
       case 'republish_session':
-        await this.republishSession();
-        return { ok: true, message: 'Session republished.' };
+        return this.republishSession();
       case 'retry_failed_invites':
         return {
           ok: true,
@@ -171,7 +211,10 @@ export class FriendConnectService implements AdminServiceController {
         return {
           ok: true,
           message: 'Diagnostics completed.',
-          data: this.getStatusSnapshot(this.config.admin.botId),
+          data: {
+            ...this.getStatusSnapshot(this.config.admin.botId),
+            sessionKeepaliveIntervalMs: this.config.sessionKeepaliveIntervalMs,
+          },
         };
       case 'run_security_diagnostics':
         return {
@@ -233,13 +276,15 @@ export class FriendConnectService implements AdminServiceController {
       });
     }
 
+    this.hardenPortalRest(portal);
+
     return portal;
   }
 
   private bindPortalEvents(portal: BedrockPortal): void {
     portal.on('sessionCreated', () => {
       this.logger.info('Bedrock session published', {
-        display: getSessionText(this.config.worldHostName, false),
+        display: 'Fracture MC',
         target: `${this.config.bedrockHost}:${this.config.bedrockPort}`,
       });
       this.recordEvent({
@@ -325,6 +370,10 @@ export class FriendConnectService implements AdminServiceController {
     });
   }
 
+  /**
+   * Invite a friend to the session
+   * Failed invites are automatically queued for retry
+   */
   private inviteFriend(player: PortalPlayer): void {
     if (!this.config.autoInviteOnFriendAdded) {
       return;
@@ -332,7 +381,7 @@ export class FriendConnectService implements AdminServiceController {
 
     const xuid = player.profile?.xuid;
     const gamertag = player.profile?.gamertag ?? 'unknown';
-
+    
     if (!xuid) {
       this.logger.warn('Cannot invite friend without XUID', { gamertag });
       return;
@@ -346,6 +395,7 @@ export class FriendConnectService implements AdminServiceController {
     void this.portal?.invitePlayer(xuid)
       .then(() => {
         this.logger.info('Invite sent', { gamertag, xuid });
+        // Remove from retry queue if it was there
         this.inviteRetryQueue.dequeue(xuid);
         this.recordEvent({
           type: 'invite_sent',
@@ -360,8 +410,10 @@ export class FriendConnectService implements AdminServiceController {
           xuid,
           error: getErrorMessage(error),
         });
+        
+        // Add to retry queue
         this.inviteRetryQueue.enqueue(xuid, { xuid, gamertag });
-
+        
         this.recordEvent({
           type: 'invite_failed',
           message: getErrorMessage(error),
@@ -371,6 +423,9 @@ export class FriendConnectService implements AdminServiceController {
       });
   }
 
+  /**
+   * Retry a failed invite (called by retry queue)
+   */
   private async retryInvite(data: InviteRetryData): Promise<void> {
     if (!this.portal) {
       throw new Error('Portal is not running');
@@ -381,7 +436,7 @@ export class FriendConnectService implements AdminServiceController {
       gamertag: data.gamertag,
       xuid: data.xuid,
     });
-
+    
     this.recordEvent({
       type: 'invite_sent',
       message: 'Invite sent after retry.',
@@ -414,126 +469,203 @@ export class FriendConnectService implements AdminServiceController {
     );
   }
 
+  async recoverPortal(source: string, error?: unknown): Promise<void> {
+    this.logger.warn('Recovering portal after Xbox session refresh failure', {
+      source,
+      error: error ? getErrorMessage(error) : undefined,
+    });
+    this.recordEvent({
+      type: 'session_recovered',
+      message: 'Portal recovery started.',
+      payload: { source },
+    });
+
+    await this.restartPortal();
+
+    this.recordEvent({
+      type: 'session_recovered',
+      message: 'Portal recovery completed.',
+      payload: { source },
+    });
+  }
+
   private async restartPortal(): Promise<void> {
+    if (this.restartPromise) {
+      await this.restartPromise;
+      return;
+    }
+
+    this.restartPromise = this.performPortalRestart()
+      .finally(() => {
+        this.restartPromise = null;
+      });
+
+    await this.restartPromise;
+  }
+
+  private async performPortalRestart(): Promise<void> {
     await this.stop();
     await this.start();
   }
 
-  private async republishSession(): Promise<void> {
+  private async republishSession(): Promise<AdminActionResult> {
+    return this.runSessionRefreshAction(
+      'manual republish',
+      'Session republished. The Minecraft session card and player count were refreshed.',
+    );
+  }
+
+  private async runKeepaliveAction(): Promise<AdminActionResult> {
+    return this.runSessionRefreshAction(
+      'admin keepalive',
+      'Keepalive completed. The bot session was pinged and is still active.',
+    );
+  }
+
+  private async runSessionRefreshAction(source: string, successMessage: string): Promise<AdminActionResult> {
+    try {
+      const data = await this.refreshSession(source);
+      return { ok: true, message: successMessage, data };
+    } catch (error) {
+      if (!isXboxSessionInitializationError(error)) {
+        throw error;
+      }
+
+      await this.recoverPortal(source, error);
+      return {
+        ok: true,
+        message: 'The Xbox session had gone stale, so the portal was reconnected and is ready again.',
+        data: { recovered: true, source },
+      };
+    }
+  }
+
+  private async refreshSession(source: string): Promise<Record<string, unknown>> {
     if (!this.portal) {
       throw new Error('Portal is not running');
     }
 
-    const count = Math.max(1, this.portal.getSessionMembers().size);
-    await this.portal.updateMemberCount(count, this.config.worldMaxPlayers);
+    const currentPlayers = this.portal.getSessionMembers().size;
+    const visibleMembers = Math.max(SESSION_KEEPALIVE_MIN_MEMBER_COUNT, currentPlayers);
+    await this.portal.updateMemberCount(visibleMembers, this.config.worldMaxPlayers);
+    await this.refreshSessionActivity(this.portal, source);
+
+    return {
+      source,
+      currentPlayers,
+      visibleMembers,
+      maxMembers: this.config.worldMaxPlayers,
+    };
   }
 
-  private startKeepalive(): void {
-    this.stopKeepalive();
+  private startSessionKeepalive(): void {
+    if (this.keepaliveTimer) {
+      return;
+    }
 
-    this.keepaliveTimer = setInterval(() => {
-      void this.keepSessionAlive('scheduled').then((result) => {
-        if (!result.ok) {
-          this.logger.warn('Scheduled session health check failed', { message: result.message });
-        }
-      });
-    }, this.config.keepaliveIntervalMs);
-
-    this.keepaliveTimer.unref?.();
+    this.keepaliveTimer = setInterval(() => void this.runScheduledKeepalive(), this.config.sessionKeepaliveIntervalMs);
+    this.logger.info('Session keepalive started', { intervalMs: this.config.sessionKeepaliveIntervalMs });
   }
 
-  private stopKeepalive(): void {
+  private stopSessionKeepalive(): void {
     if (!this.keepaliveTimer) {
       return;
     }
 
     clearInterval(this.keepaliveTimer);
     this.keepaliveTimer = null;
+    this.logger.info('Session keepalive stopped');
   }
 
-  private async keepSessionAlive(source: 'scheduled' | 'admin_panel'): Promise<AdminActionResult> {
-    if (!this.portal) {
-      return { ok: false, message: 'Portal is not running.' };
+  private async runScheduledKeepalive(): Promise<void> {
+    if (this.keepaliveInFlight) {
+      this.logger.debug('Session keepalive skipped because the previous ping is still running');
+      return;
     }
 
-    const currentPlayers = Math.max(1, this.portal.getSessionMembers().size);
+    this.keepaliveInFlight = true;
 
     try {
-      await this.portal.updateMemberCount(currentPlayers, this.config.worldMaxPlayers);
-      this.logger.info('Session health check completed', {
-        source,
-        currentPlayers,
-        maxPlayers: this.config.worldMaxPlayers,
+      const data = await this.refreshSession('scheduled keepalive');
+      this.logger.debug('Session keepalive completed', {
+        currentPlayers: Number(data.currentPlayers),
+        visibleMembers: Number(data.visibleMembers),
       });
-      this.recordEvent({
-        type: 'session_keepalive',
-        message: 'Session health check completed.',
-        payload: { source, currentPlayers, maxPlayers: this.config.worldMaxPlayers },
-      });
-
-      return { ok: true, message: 'Session health check completed.' };
     } catch (error) {
-      if (!isXboxSessionInitializationError(error)) {
-        const message = getErrorMessage(error);
-        this.logger.warn('Session health check failed', { source, error: message });
-        this.recordEvent({
-          type: 'session_error',
-          message: 'Session health check failed.',
-          payload: { source, error: message },
+      if (isXboxSessionInitializationError(error)) {
+        await this.recoverPortal('scheduled keepalive', error).catch((recoveryError: unknown) => {
+          this.logger.error('Portal recovery failed after keepalive error', { error: getErrorMessage(recoveryError) });
         });
-        return { ok: false, message: 'Session health check failed.' };
+        return;
       }
 
-      try {
-        await this.recoverPortal('Xbox session health check failed.', error);
-        return { ok: true, message: 'Session was stale. Portal reconnected.' };
-      } catch (recoveryError) {
-        return {
-          ok: false,
-          message: `Session recovery failed: ${getErrorMessage(recoveryError)}`,
-        };
-      }
+      this.logger.warn('Session keepalive failed', { error: getErrorMessage(error) });
+    } finally {
+      this.keepaliveInFlight = false;
     }
   }
 
-  private async recoverPortal(reason: string, error: unknown): Promise<void> {
-    if (this.recoveryPromise) {
-      return this.recoveryPromise;
+  private async refreshSessionActivity(portal: BedrockPortal, source: string): Promise<void> {
+    const sessionName = portal.session.name;
+    if (!sessionName) {
+      return;
     }
 
-    const originalError = getErrorMessage(error);
+    const host = portal.host as unknown as PortalHostRuntime;
+    await host.rest.setActivity(sessionName).catch((error: unknown) => {
+      this.logger.warn('Session activity refresh failed', { source, error: getErrorMessage(error) });
+    });
+  }
 
-    this.recoveryPromise = (async () => {
-      this.logger.warn('Recovering Bedrock session', { reason, error: originalError });
-      this.recordEvent({
-        type: 'session_recovery_started',
-        message: 'Bedrock session became stale. Reconnecting portal.',
-        payload: { reason, error: originalError },
-      });
+  private hardenPortalRest(portal: BedrockPortal): void {
+    const host = portal.host as unknown as PortalHostRuntime;
+    const rest = host.rest;
+    const originalUpdateConnection = rest.updateConnection.bind(rest);
+    const originalUpdateSession = rest.updateSession.bind(rest);
+    const originalLeaveSession = rest.leaveSession.bind(rest);
 
-      try {
-        await this.restartPortal();
-        this.logger.info('Bedrock session recovery completed');
-        this.recordEvent({
-          type: 'session_recovery_completed',
-          message: 'Bedrock session reconnected successfully.',
-          payload: { reason },
-        });
-      } catch (recoveryError) {
-        const recoveryMessage = getErrorMessage(recoveryError);
-        this.logger.error('Bedrock session recovery failed', { error: recoveryMessage });
-        this.recordEvent({
-          type: 'session_error',
-          message: 'Bedrock session recovery failed.',
-          payload: { reason, error: recoveryMessage },
-        });
-        throw recoveryError;
-      } finally {
-        this.recoveryPromise = null;
+    rest.updateConnection = async (sessionName: string, connectionId: string): Promise<void> => {
+      const xuid = host.profile?.xuid;
+      const subscriptionId = host.subscriptionId;
+
+      if (!xuid || !subscriptionId) {
+        await originalUpdateConnection(sessionName, connectionId);
+        return;
       }
-    })();
 
-    return this.recoveryPromise;
+      this.logger.debug('Harden: updateConnection using initialized member update', { sessionName, xuid });
+      await rest.updateSession(sessionName, buildInitializedMemberUpdate(xuid, connectionId, subscriptionId));
+    };
+
+    rest.updateSession = async (sessionName: string, payload: any): Promise<unknown> => {
+      const xuid = host.profile?.xuid;
+      if (xuid && payload?.members?.me) {
+        // Ensure initialize constant is always present in any 'me' member update
+        payload.members.me.constants = {
+          ...payload.members.me.constants,
+          system: {
+            ...(payload.members.me.constants?.system ?? {}),
+            xuid,
+            initialize: true,
+          },
+        };
+        this.logger.debug('Harden: updateSession injected initialize constant', { sessionName });
+      }
+      return originalUpdateSession(sessionName, payload);
+    };
+
+    rest.leaveSession = async (sessionName: string): Promise<void> => {
+      try {
+        await originalLeaveSession(sessionName);
+      } catch (error) {
+        if (isXboxSessionInitializationError(error)) {
+          this.logger.warn('Ignored stale Xbox session during portal cleanup', { error: getErrorMessage(error) });
+          return;
+        }
+
+        throw error;
+      }
+    };
   }
 
   private async applyRemoteConfig(payload: unknown): Promise<AdminActionResult> {
@@ -622,6 +754,31 @@ export class FriendConnectService implements AdminServiceController {
   }
 }
 
+function buildInitializedMemberUpdate(xuid: string, connectionId: string, subscriptionId: string): SessionMemberUpdate {
+  return {
+    members: {
+      me: {
+        constants: {
+          system: {
+            xuid,
+            initialize: true,
+          },
+        },
+        properties: {
+          system: {
+            active: true,
+            connection: connectionId,
+            subscription: {
+              id: subscriptionId,
+              changeTypes: ['everything'],
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 function readPatchPayload(payload: unknown): unknown {
   if (typeof payload === 'object' && payload !== null && !Array.isArray(payload) && 'patch' in payload) {
     return (payload as Record<string, unknown>).patch;
@@ -629,6 +786,23 @@ function readPatchPayload(payload: unknown): unknown {
 
   return payload;
 }
+
+/**
+ * Extract player identity from various player data formats
+ *
+ * Player data can come in different formats from different APIs:
+ * - Portal events have a nested `profile` object
+ * - Social/friend APIs may have properties at the top level
+ *
+ * Priority order for gamertag:
+ * 1. gamertag (primary identifier)
+ * 2. uniqueModernGamertag (unique modern format)
+ * 3. modernGamertag (modern format, may not be unique)
+ * 4. displayName (fallback display name)
+ *
+ * @param player - Player data from portal or social APIs
+ * @returns Normalized player identity with XUID and gamertag
+ */
 function getPlayerIdentity(player: SocialPlayer): PlayerIdentity {
   if ('profile' in player && player.profile) {
     return {
@@ -664,12 +838,6 @@ function readXuidPayload(payload: unknown): string | null {
   }
 
   return value;
-}
-
-function isXboxSessionInitializationError(error: unknown): boolean {
-  const message = getErrorMessage(error).toLowerCase();
-  return message.includes('member initialization')
-    || (message.includes('initialize') && message.includes('member reservations'));
 }
 
 function isSameConfigValue(left: unknown, right: unknown): boolean {

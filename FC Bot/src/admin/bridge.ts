@@ -18,7 +18,6 @@ import { ACTION_RATE_LIMITS, DEFAULT_STALE_ACTION_THRESHOLD_MS, UNSUPPORTED_ACTI
 type ActionUpdate = {
   status: 'running' | 'completed' | 'failed';
   completed_at?: string;
-  payload?: unknown;
   result?: AdminActionResult;
 };
 
@@ -28,11 +27,9 @@ const supportedActions = new Set<AdminActionType>([
   'block_xuid',
   'clear_invite_cooldown',
   'clear_stale_actions',
-  'create_admin_account',
   'disable_lockdown',
   'enable_lockdown',
-  'invite_admin_user',
-  'keepalive_ping',
+  'keepalive',
   'reconnect_portal',
   'reload_config',
   'republish_session',
@@ -74,6 +71,7 @@ export class AdminBridge implements AdminEventSink {
       },
       (event) => this.persistEvent(event),
       logger,
+      'Admin event retry queue',
     );
   }
 
@@ -116,6 +114,7 @@ export class AdminBridge implements AdminEventSink {
         error: getErrorMessage(error),
         eventType: event.type,
       });
+      // Add to retry queue
       this.eventRetryQueue.enqueue(`${event.type}-${Date.now()}`, event);
     });
   }
@@ -166,26 +165,6 @@ export class AdminBridge implements AdminEventSink {
         fix_action: 'retry_failed_invites',
         payload: event.payload ?? {},
       });
-    }
-
-    if (event.type === 'session_error') {
-      await this.client.from('bot_errors').insert({
-        bot_id: this.config.botId,
-        code: 'session_refresh_failed',
-        message: event.message,
-        severity: 'warning',
-        fix_action: 'reconnect_portal',
-        payload: event.payload ?? {},
-      });
-    }
-
-    if (event.type === 'session_recovery_completed') {
-      await this.client
-        .from('bot_errors')
-        .update({ status: 'resolved', acknowledged_at: new Date().toISOString() })
-        .eq('bot_id', this.config.botId)
-        .eq('code', 'session_refresh_failed')
-        .eq('status', 'open');
     }
 
     if (event.type === 'friend_rejected') {
@@ -244,24 +223,22 @@ export class AdminBridge implements AdminEventSink {
   }
 
   private async processAction(action: AdminActionRow): Promise<void> {
-    await this.updateAction(action.id, {
-      status: 'running',
-      ...(action.action_type === 'create_admin_account' ? { payload: sanitizeAccountCreationPayload(action.payload) } : {}),
-    });
+    await this.updateAction(action.id, { status: 'running' });
 
     const result = await this.executeAction(action)
       .catch((error: unknown): AdminActionResult => ({
         ok: false,
         message: getErrorMessage(error),
       }));
+    const displayResult = describeActionResult(action.action_type, result);
 
     await this.updateAction(action.id, {
-      status: result.ok ? 'completed' : 'failed',
+      status: displayResult.ok ? 'completed' : 'failed',
       completed_at: new Date().toISOString(),
-      result,
+      result: displayResult,
     });
 
-    await this.logFixAttempt(action, result);
+    await this.logFixAttempt(action, displayResult);
   }
 
   private async executeAction(action: AdminActionRow): Promise<AdminActionResult> {
@@ -291,16 +268,13 @@ export class AdminBridge implements AdminEventSink {
       return this.acknowledgeError(action.payload);
     }
 
-    if (action.action_type === 'invite_admin_user') {
-      return this.inviteAdminUser(action);
-    }
-
-    if (action.action_type === 'create_admin_account') {
-      return this.createAdminAccount(action);
-    }
-
     return this.controller.performAdminAction(action.action_type, action.payload);
   }
+
+  /**
+   * Check if an action can run based on rate limits
+   * Uses a sliding window counter for efficient rate limiting
+   */
   private canRunAction(actionType: AdminActionType): boolean {
     const limit = ACTION_RATE_LIMITS[actionType];
     if (!limit) {
@@ -309,6 +283,8 @@ export class AdminBridge implements AdminEventSink {
 
     const now = Date.now();
     const lastRun = this.recentActionRuns.get(actionType) ?? 0;
+
+    // Simple sliding window: check if enough time has passed since last run
     if (now - lastRun < limit.windowMs / limit.max) {
       return false;
     }
@@ -355,280 +331,6 @@ export class AdminBridge implements AdminEventSink {
     }
 
     return { ok: true, message: 'Error acknowledged.' };
-  }
-
-  private async inviteAdminUser(action: AdminActionRow): Promise<AdminActionResult> {
-    if (!action.created_by) {
-      return { ok: false, message: 'Missing operator identity.' };
-    }
-
-    const permitted = await this.operatorCanManageUsers(action.created_by);
-    if (!permitted) {
-      await this.persistSecurityEvent('warning', 'admin_invite_denied', 'Admin invite denied by permission check.', {
-        createdBy: action.created_by,
-      });
-      return { ok: false, message: 'Admin users permission is required.' };
-    }
-
-    const email = readPayloadString(action.payload, 'email')?.toLowerCase();
-    const role = readAdminRole(action.payload);
-    const permissions = readPermissionList(action.payload, role);
-    const redirectTo = readPayloadString(action.payload, 'redirectTo');
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false, message: 'Invalid admin email.' };
-    }
-
-    if (!redirectTo || !/^https?:\/\/[^\s"')]+$/i.test(redirectTo)) {
-      return { ok: false, message: 'Invalid invite redirect URL.' };
-    }
-
-    const { data, error } = await this.client.auth.admin.inviteUserByEmail(email, {
-      redirectTo,
-      data: {
-        panel: 'friendconnect',
-        botId: this.config.botId,
-        role,
-      },
-    });
-
-    if (error || !data.user?.id) {
-      const failureMessage = formatInviteFailureMessage(error?.message ?? 'Invite did not return a user id.');
-      if (shouldGenerateManualInviteLink(failureMessage)) {
-        return this.generateManualAdminInviteLink(action, email, role, permissions, redirectTo, failureMessage);
-      }
-
-      await this.persistSecurityEvent('warning', 'admin_invite_failed', 'Admin invite failed.', {
-        email,
-        reason: failureMessage,
-      });
-      return { ok: false, message: failureMessage };
-    }
-
-    const { error: profileError } = await this.client.from('admin_users').upsert({
-      user_id: data.user.id,
-      email,
-      role,
-      permissions,
-      invited_by: action.created_by,
-      invited_at: new Date().toISOString(),
-      accepted_at: null,
-      password_set_at: null,
-      disabled_at: null,
-    }, { onConflict: 'user_id' });
-
-    if (profileError) {
-      return { ok: false, message: profileError.message };
-    }
-
-    await this.persistSecurityEvent('info', 'admin_invite_sent', 'Admin invite sent.', {
-      email,
-      role,
-      createdBy: action.created_by,
-    });
-
-    return { ok: true, message: `Invite sent to ${email}.`, data: { role, permissions } };
-  }
-
-  private async createAdminAccount(action: AdminActionRow): Promise<AdminActionResult> {
-    if (!action.created_by) {
-      return { ok: false, message: 'Missing operator identity.' };
-    }
-
-    const permitted = await this.operatorCanManageUsers(action.created_by);
-    if (!permitted) {
-      await this.persistSecurityEvent('warning', 'admin_create_denied', 'Admin account creation denied by permission check.', {
-        createdBy: action.created_by,
-      });
-      return { ok: false, message: 'Admin users permission is required.' };
-    }
-
-    const email = readPayloadString(action.payload, 'email')?.toLowerCase();
-    const credential = readPayloadString(action.payload, 'credential');
-    const role = readAdminRole(action.payload);
-    const permissions = readPermissionList(action.payload, role);
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false, message: 'Invalid admin email.' };
-    }
-
-    if (!credential || credential.length < 12) {
-      return { ok: false, message: 'Password must be at least 12 characters.' };
-    }
-
-    const existingProfile = await this.client
-      .from('admin_users')
-      .select('user_id, disabled_at')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (existingProfile.error) {
-      return { ok: false, message: existingProfile.error.message };
-    }
-
-    if (existingProfile.data && !existingProfile.data.disabled_at) {
-      return { ok: false, message: 'An active admin account already exists for this email.' };
-    }
-
-    const { data, error } = await this.client.auth.admin.createUser({
-      email,
-      ['password']: credential,
-      email_confirm: true,
-      user_metadata: {
-        panel: 'friendconnect',
-        botId: this.config.botId,
-        role,
-      },
-    });
-
-    if (error || !data.user?.id) {
-      await this.persistSecurityEvent('warning', 'admin_create_failed', 'Admin account creation failed.', {
-        email,
-        reason: error?.message ?? 'Supabase did not return a user id.',
-        createdBy: action.created_by,
-      });
-      return { ok: false, message: error?.message ?? 'Supabase did not return a user id.' };
-    }
-
-    const now = new Date().toISOString();
-    const { error: profileError } = await this.client.from('admin_users').upsert({
-      user_id: data.user.id,
-      email,
-      role,
-      permissions,
-      invited_by: action.created_by,
-      invited_at: now,
-      accepted_at: now,
-      password_set_at: now,
-      disabled_at: null,
-    }, { onConflict: 'user_id' });
-
-    if (profileError) {
-      return { ok: false, message: profileError.message };
-    }
-
-    await this.persistSecurityEvent('info', 'admin_account_created', 'Admin account created without email verification.', {
-      email,
-      role,
-      createdBy: action.created_by,
-    });
-
-    return { ok: true, message: `Admin account created for ${email}.`, data: { role, permissions } };
-  }
-
-  private async generateManualAdminInviteLink(
-    action: AdminActionRow,
-    email: string,
-    role: 'admin' | 'operator' | 'viewer',
-    permissions: string[],
-    redirectTo: string,
-    reason: string,
-  ): Promise<AdminActionResult> {
-    const { data, error } = await this.client.auth.admin.generateLink({
-      type: 'invite',
-      email,
-      options: {
-        redirectTo,
-        data: {
-          panel: 'friendconnect',
-          botId: this.config.botId,
-          role,
-        },
-      },
-    });
-
-    const manualInviteLink = data?.properties?.action_link;
-    if (error || !data.user?.id || !manualInviteLink) {
-      const message = error?.message ?? 'Manual invite link generation failed.';
-      await this.persistSecurityEvent('warning', 'admin_invite_failed', 'Admin invite failed.', {
-        email,
-        reason: message,
-      });
-      return { ok: false, message };
-    }
-
-    const { error: profileError } = await this.client.from('admin_users').upsert({
-      user_id: data.user.id,
-      email,
-      role,
-      permissions,
-      invited_by: action.created_by,
-      invited_at: new Date().toISOString(),
-      accepted_at: null,
-      password_set_at: null,
-      disabled_at: null,
-    }, { onConflict: 'user_id' });
-
-    if (profileError) {
-      return { ok: false, message: profileError.message };
-    }
-
-    if (this.config.inviteMailer.enabled) {
-      try {
-        const { sendAdminInviteEmail } = await import('./mailer.js');
-        await sendAdminInviteEmail(this.config.inviteMailer, email, manualInviteLink);
-        await this.persistSecurityEvent('info', 'admin_invite_sent', 'Admin invite sent through configured SMTP provider.', {
-          email,
-          role,
-          createdBy: action.created_by,
-        });
-
-        return {
-          ok: true,
-          message: `Invite email sent to ${email} through the configured mail provider.`,
-          data: { role, permissions },
-        };
-      } catch (error: unknown) {
-        this.logger.warn('Admin invite SMTP delivery failed', {
-          email,
-          error: getErrorMessage(error),
-        });
-        await this.persistSecurityEvent('warning', 'admin_invite_mailer_failed', 'Admin invite SMTP delivery failed.', {
-          email,
-          role,
-          reason: 'SMTP delivery failed.',
-          createdBy: action.created_by,
-        });
-
-        return {
-          ok: true,
-          message: 'SMTP invite delivery failed. Copy and send the generated link manually.',
-          data: { role, permissions, manualInviteLink },
-        };
-      }
-    }
-
-    await this.persistSecurityEvent('warning', 'admin_invite_manual_link', 'Admin invite email unavailable; manual link generated.', {
-      email,
-      role,
-      reason,
-      createdBy: action.created_by,
-    });
-
-    return {
-      ok: true,
-      message: 'Invite link generated. Supabase email quota is currently blocked, so send the generated link manually.',
-      data: { role, permissions, manualInviteLink },
-    };
-  }
-
-  private async operatorCanManageUsers(userId: string): Promise<boolean> {
-    const { data, error } = await this.client
-      .from('admin_users')
-      .select('role, permissions, disabled_at')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (error || !data || data.disabled_at) {
-      return false;
-    }
-
-    const row = data as { role?: unknown; permissions?: unknown };
-    if (row.role === 'owner') {
-      return true;
-    }
-
-    return Array.isArray(row.permissions) && row.permissions.includes('users:write');
   }
 
   private async updateAction(id: string, update: ActionUpdate): Promise<void> {
@@ -680,24 +382,6 @@ function isSupportedAction(value: string): value is AdminActionType {
   return supportedActions.has(value as AdminActionType);
 }
 
-function formatInviteFailureMessage(message: string): string {
-  const lower = message.toLowerCase();
-  if (lower.includes('rate limit') || lower.includes('email rate')) {
-    return 'Supabase email rate limit reached. Wait for the quota window to reset or configure custom SMTP in Supabase Auth.';
-  }
-
-  if (lower.includes('smtp') || lower.includes('mail') || lower.includes('email')) {
-    return `Supabase could not send the invite email: ${message}`;
-  }
-
-  return message;
-}
-
-function shouldGenerateManualInviteLink(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes('rate limit') || lower.includes('email quota') || lower.includes('email rate');
-}
-
 function readPayloadString(payload: unknown, key: string): string | null {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return null;
@@ -707,48 +391,124 @@ function readPayloadString(payload: unknown, key: string): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function sanitizeAccountCreationPayload(payload: unknown): Record<string, unknown> {
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    return {};
-  }
+function describeActionResult(actionType: string, result: AdminActionResult): AdminActionResult {
+  const label = actionLabel(actionType);
+  const botMessage = (result.message || '').trim() || 'The bot successfully processed the command.';
+  const steps = actionSteps(actionType, result.ok);
+  
+  // Create a more descriptive summary for the fix logs
+  const summary = result.ok
+    ? `${label} was successful. ${actionOutcome(actionType)}`
+    : `${label} failed. ${botMessage}`;
 
-  const safePayload = { ...(payload as Record<string, unknown>) };
-  delete safePayload.credential;
-  delete safePayload.credentialConfirm;
   return {
-    ...safePayload,
-    credential: '[removed]',
+    ...result,
+    message: summary,
+    data: {
+      ...(result.data ?? {}),
+      botMessage,
+      steps,
+      // Include a 'consoleText' field that combines everything for a log-like feel
+      consoleText: result.ok 
+        ? [`[SUCCESS] ${label}`, ...steps.map(s => ` > ${s}`), `[RESULT] ${botMessage}`].join('\n')
+        : [`[FAILED] ${label}`, `[ERROR] ${botMessage}`, 'Review the fix steps and try again.'].join('\n')
+    },
   };
 }
 
-function readAdminRole(payload: unknown): 'admin' | 'operator' | 'viewer' {
-  const role = readPayloadString(payload, 'role');
-  if (role === 'admin' || role === 'operator' || role === 'viewer') {
-    return role;
-  }
+function actionLabel(actionType: string): string {
+  const labels: Record<string, string> = {
+    acknowledge_error: 'Acknowledge error',
+    apply_config: 'Apply saved settings',
+    block_xuid: 'Block player XUID',
+    clear_invite_cooldown: 'Clear invite cooldown',
+    clear_stale_actions: 'Clear stuck commands',
+    disable_lockdown: 'Disable lockdown',
+    enable_lockdown: 'Enable lockdown',
+    keepalive: 'Ping bot session',
+    reconnect_portal: 'Reconnect portal',
+    reload_config: 'Reload runtime settings',
+    republish_session: 'Republish session',
+    retry_failed_invites: 'Retry failed invites',
+    run_diagnostics: 'Run diagnostics',
+    run_security_diagnostics: 'Run security diagnostics',
+    unblock_xuid: 'Unblock player XUID',
+  };
 
-  return 'operator';
+  return labels[actionType] ?? actionType.replaceAll('_', ' ');
 }
 
-function readPermissionList(payload: unknown, role: 'admin' | 'operator' | 'viewer'): string[] {
-  if (role === 'viewer') {
-    return [];
+function actionOutcome(actionType: string): string {
+  const outcomes: Record<string, string> = {
+    acknowledge_error: 'The selected error was marked as acknowledged.',
+    apply_config: 'The bot validated the saved settings and applied any real changes.',
+    block_xuid: 'The player XUID was added to the blocklist and the policy was reloaded.',
+    clear_invite_cooldown: 'Saved invite cooldown entries were cleared so invites can be sent again.',
+    clear_stale_actions: 'Old queued or running commands were closed so new commands can move forward.',
+    disable_lockdown: 'Lockdown mode was turned off and normal friend policy is active again.',
+    enable_lockdown: 'Lockdown mode was turned on so only allowlisted players can pass policy checks.',
+    keepalive: 'The bot refreshed the Xbox session heartbeat and visible player count.',
+    reconnect_portal: 'The bot closed the old portal session and opened a fresh Xbox session.',
+    reload_config: 'The bridge refreshed the current runtime config snapshot.',
+    republish_session: 'The Minecraft session card and visible player count were refreshed.',
+    retry_failed_invites: 'The bot checked the failed-invite retry queue.',
+    run_diagnostics: 'The bot checked status, target server, friend policy, and session timer.',
+    run_security_diagnostics: 'The bot checked lockdown, friend policy, lists, and admin safety controls.',
+    unblock_xuid: 'The player XUID was removed from the blocklist and the policy was reloaded.',
+  };
+
+  return outcomes[actionType] ?? 'The command was processed by the bot bridge.';
+}
+
+function actionSteps(actionType: string, ok: boolean): string[] {
+  if (!ok) {
+    return [
+      'The bridge accepted the command and handed it to the bot.',
+      'The bot reported a problem before the command completed.',
+      'Review the message shown with this log entry before running another fix.',
+    ];
   }
 
-  const defaultPermissions = role === 'admin'
-    ? ['config:write', 'actions:write', 'users:write', 'security:write']
-    : ['actions:write'];
+  const steps: Record<string, string[]> = {
+    keepalive: [
+      'The bridge sent a lightweight ping command to the bot.',
+      'The bot refreshed the Xbox session member count.',
+      'The bot refreshed the public session activity handle.',
+    ],
+    reconnect_portal: [
+      'The bot stopped the current portal cleanly.',
+      'The bot opened a new Xbox session reservation.',
+      'The bot resumed friend and invite automation.',
+    ],
+    republish_session: [
+      'The bot checked the current portal player count.',
+      'The bot kept the visible count at one or higher so Xbox accepts the session.',
+      'The bot refreshed the session card shown in Minecraft.',
+    ],
+    clear_invite_cooldown: [
+      'The bot cleared saved invite cooldown entries.',
+      'The next valid friend event can send a fresh invite.',
+    ],
+    retry_failed_invites: [
+      'The bot checked how many failed invites are waiting.',
+      'Queued invite retries will continue on their normal retry schedule.',
+    ],
+    clear_stale_actions: [
+      'The bridge found old queued or running commands.',
+      'The bridge marked stale commands as failed so the queue is readable.',
+    ],
+    run_diagnostics: [
+      'The bot checked whether the portal is online.',
+      'The bot reported player counts, target server, policy, and keepalive timing.',
+    ],
+    run_security_diagnostics: [
+      'The bot checked lockdown mode, friend policy, and access-list counts.',
+      'The bot confirmed admin actions are allowlisted and no shell access is exposed.',
+    ],
+  };
 
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    return defaultPermissions;
-  }
-
-  const value = (payload as Record<string, unknown>).permissions;
-  if (!Array.isArray(value)) {
-    return defaultPermissions;
-  }
-
-  const allowed = new Set(['config:write', 'actions:write', 'users:write', 'security:write']);
-  const sanitized = value.filter((entry): entry is string => typeof entry === 'string' && allowed.has(entry));
-  return [...new Set(sanitized)];
+  return steps[actionType] ?? [
+    'The bridge accepted the command and handed it to the bot.',
+    'The bot completed the requested fix.',
+  ];
 }
