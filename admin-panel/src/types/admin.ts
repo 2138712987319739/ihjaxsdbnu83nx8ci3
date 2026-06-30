@@ -30,6 +30,7 @@ export type BotConfig = {
   friendCheckIntervalMs: number;
   friendAddIntervalMs: number;
   friendRemoveIntervalMs: number;
+  keepaliveIntervalMs: number;
 };
 
 export type BotStatus = {
@@ -43,6 +44,7 @@ export type BotStatus = {
   friendPolicy: FriendPolicy;
   lockdownMode: boolean;
   lastHeartbeat: string | null;
+  heartbeatFresh: boolean;
 };
 
 export type BotEvent = {
@@ -112,6 +114,21 @@ export type SecurityEvent = {
   createdAt: string;
 };
 
+export type AdminRole = 'owner' | 'admin' | 'operator' | 'viewer';
+export type AdminPermission = 'manage_bot' | 'manage_users' | 'view_logs' | 'manage_config' | 'run_actions';
+
+export type AdminUser = {
+  id: string;
+  email: string;
+  role: AdminRole;
+  permissions: AdminPermission[];
+  invitedAt: string | null;
+  acceptedAt: string | null;
+  passwordSetAt: string | null;
+  lastSeenAt: string | null;
+  disabledAt: string | null;
+};
+
 export type DashboardData = {
   config: BotConfig;
   status: BotStatus;
@@ -121,4 +138,5 @@ export type DashboardData = {
   fixLogs: FixLog[];
   players: PlayerSession[];
   securityEvents: SecurityEvent[];
+  adminUsers: AdminUser[];
 };
