@@ -23,16 +23,20 @@ type DeveloperPanelProps = {
   profile: AdminUser | null;
 };
 
+const staleSessionErrorCode = ['session', 'refresh', 'failed'].join('_');
+
 const knownFixes: Record<string, BotActionType> = {
   auth_expired: 'reconnect_portal',
   invite_failed: 'retry_failed_invites',
   rta_disconnected: 'reconnect_portal',
   session_stale: 'republish_session',
+  [staleSessionErrorCode]: 'reconnect_portal',
   config_invalid: 'reload_config',
   cooldown_stuck: 'clear_invite_cooldown',
 };
 
 const fixActions = [
+  'keepalive_ping',
   'run_diagnostics',
   'republish_session',
   'reconnect_portal',
@@ -103,7 +107,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
     }
 
     await queueBotAction(action, { errorId: error.id, code: error.code });
-    setMessage(`Queued ${action}.`);
+    setMessage(`${actionTitle(action)} queued.`);
   }
 
   async function runAction(action: BotActionType, payload: Record<string, unknown> = {}) {
@@ -113,7 +117,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
     }
 
     await queueBotAction(action, payload);
-    setMessage(`Queued ${action}.`);
+    setMessage(`${actionTitle(action)} queued.`);
   }
 
   async function updateBlockedXuid(action: 'block_xuid' | 'unblock_xuid') {
@@ -203,7 +207,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
             </TabsList>
 
             <TabsContent value="console">
-              <DataTable data={data.events} columns={eventColumns} empty="No console events yet." />
+              <DeveloperConsole data={data} />
             </TabsContent>
 
             <TabsContent value="errors">
@@ -213,7 +217,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Bug size={16} className="text-red-200" />
-                        <p className="font-medium">{error.code}</p>
+                        <p className="font-medium">{errorTitle(error)}</p>
                         <Badge tone={error.severity === 'critical' ? 'red' : 'yellow'}>{error.severity}</Badge>
                         <Badge>{error.status}</Badge>
                       </div>
@@ -235,7 +239,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                 {fixActions.map((action) => (
                   <Button key={action} variant="outline" className="justify-start" onClick={() => void runAction(action)}>
                     <Play size={16} />
-                    {action.replaceAll('_', ' ')}
+                    {actionTitle(action)}
                   </Button>
                 ))}
               </div>
@@ -252,7 +256,7 @@ export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProp
                     {securityActions.map((action) => (
                       <Button key={action} variant={action === 'enable_lockdown' ? 'destructive' : 'outline'} className="justify-start" onClick={() => void runAction(action)}>
                         {action === 'enable_lockdown' ? <LockKeyhole size={16} /> : action === 'disable_lockdown' ? <UnlockKeyhole size={16} /> : <Radar size={16} />}
-                        {action.replaceAll('_', ' ')}
+                        {actionTitle(action)}
                       </Button>
                     ))}
                   </div>
@@ -394,6 +398,51 @@ function DefenseLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+function DeveloperConsole({ data }: { data: DashboardData }) {
+  const entries = useMemo(() => [
+    ...data.events.map((event) => ({
+      id: `event-${event.id}`,
+      title: eventTitle(event),
+      body: eventBody(event),
+      time: event.createdAt,
+      tone: eventTone(event.type),
+    })),
+    ...data.actions.map((action) => ({
+      id: `action-${action.id}`,
+      title: actionTitle(action.actionType),
+      body: actionStatusText(action.actionType, action.status, action.message),
+      time: action.createdAt,
+      tone: action.status === 'failed' ? 'red' : action.status === 'completed' ? 'green' : 'blue',
+    })),
+    ...data.fixLogs.map((log) => ({
+      id: `fix-${log.id}`,
+      title: `Fix log: ${actionTitle(log.actionType)}`,
+      body: fixLogText(log),
+      time: log.createdAt,
+      tone: log.status === 'completed' ? 'green' : 'red',
+    })),
+  ].sort((left, right) => Date.parse(right.time) - Date.parse(left.time)).slice(0, 60), [data.actions, data.events, data.fixLogs]);
+
+  if (!entries.length) {
+    return <div className="rounded-lg border border-border bg-black/24 p-6 text-sm text-muted-foreground">No console activity yet.</div>;
+  }
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-border bg-black/30 p-3">
+      {entries.map((entry) => (
+        <div key={entry.id} className="grid gap-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 md:grid-cols-[132px_1fr_auto] md:items-start">
+          <Badge tone={entry.tone as 'blue' | 'green' | 'red' | 'yellow' | 'neutral'}>{entry.tone}</Badge>
+          <div className="min-w-0">
+            <p className="font-medium">{entry.title}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{entry.body}</p>
+          </div>
+          <span className="text-xs text-muted-foreground md:text-right">{formatDate(entry.time)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DataTable<T>({ data, columns, empty }: { data: T[]; columns: unknown[]; empty: string }) {
   const table = useReactTable({
     data,
@@ -431,7 +480,204 @@ function DataTable<T>({ data, columns, empty }: { data: T[]; columns: unknown[];
   );
 }
 
-const eventHelper = createColumnHelper<BotEvent>();
+const actionText: Record<string, { title: string; queued: string; running: string; completed: string; failed: string }> = {
+  acknowledge_error: {
+    title: 'Acknowledge error',
+    queued: 'The bot will mark the selected error as acknowledged.',
+    running: 'The bot is updating the error record.',
+    completed: 'The selected error was acknowledged.',
+    failed: 'The error could not be acknowledged.',
+  },
+  apply_config: {
+    title: 'Apply saved settings',
+    queued: 'The bot will validate the saved settings and reload safely.',
+    running: 'The bot is applying the latest saved settings.',
+    completed: 'The saved settings were applied.',
+    failed: 'The saved settings could not be applied.',
+  },
+  block_xuid: {
+    title: 'Block player XUID',
+    queued: 'The bot will add this XUID to the blocklist.',
+    running: 'The bot is updating the player blocklist.',
+    completed: 'The player was blocked and policy was reloaded.',
+    failed: 'The player could not be blocked.',
+  },
+  clear_invite_cooldown: {
+    title: 'Clear invite cooldown',
+    queued: 'The bot will clear remembered invite cooldowns.',
+    running: 'The bot is clearing invite cooldown state.',
+    completed: 'Invite cooldown state was cleared.',
+    failed: 'Invite cooldown state could not be cleared.',
+  },
+  clear_stale_actions: {
+    title: 'Clear stale commands',
+    queued: 'The bridge will close commands that have been stuck too long.',
+    running: 'The bridge is checking for stale commands.',
+    completed: 'Stale commands were cleared.',
+    failed: 'Stale commands could not be cleared.',
+  },
+  create_admin_account: {
+    title: 'Create admin account',
+    queued: 'The bridge will create a confirmed admin login.',
+    running: 'The bridge is creating the admin login.',
+    completed: 'The admin login was created.',
+    failed: 'The admin login could not be created.',
+  },
+  disable_lockdown: {
+    title: 'Disable lockdown',
+    queued: 'The bot will return to the configured friend policy.',
+    running: 'The bot is disabling lockdown mode.',
+    completed: 'Lockdown mode was disabled.',
+    failed: 'Lockdown mode could not be disabled.',
+  },
+  enable_lockdown: {
+    title: 'Enable lockdown',
+    queued: 'The bot will allow only explicitly allowed players.',
+    running: 'The bot is enabling lockdown mode.',
+    completed: 'Lockdown mode was enabled.',
+    failed: 'Lockdown mode could not be enabled.',
+  },
+  invite_admin_user: {
+    title: 'Send admin invite',
+    queued: 'The bridge will create an admin invitation.',
+    running: 'The bridge is preparing the admin invitation.',
+    completed: 'The admin invitation is ready.',
+    failed: 'The admin invitation could not be sent.',
+  },
+  keepalive_ping: {
+    title: 'Check session health',
+    queued: 'The bot will check that the Bedrock session is still alive.',
+    running: 'The bot is checking the Bedrock session.',
+    completed: 'The Bedrock session health check completed.',
+    failed: 'The Bedrock session health check failed.',
+  },
+  reconnect_portal: {
+    title: 'Reconnect portal',
+    queued: 'The bot will restart the Bedrock portal session.',
+    running: 'The bot is reconnecting the portal session.',
+    completed: 'The portal session was reconnected.',
+    failed: 'The portal session could not reconnect.',
+  },
+  reload_config: {
+    title: 'Reload config',
+    queued: 'The bot will refresh its runtime configuration snapshot.',
+    running: 'The bot is refreshing its configuration snapshot.',
+    completed: 'The runtime configuration snapshot was refreshed.',
+    failed: 'The runtime configuration snapshot could not refresh.',
+  },
+  republish_session: {
+    title: 'Republish session',
+    queued: 'The bot will refresh the Friends-tab session card.',
+    running: 'The bot is refreshing the session card.',
+    completed: 'The Friends-tab session card was refreshed.',
+    failed: 'The session card could not be refreshed.',
+  },
+  retry_failed_invites: {
+    title: 'Retry failed invites',
+    queued: 'The bot will retry known failed player invites.',
+    running: 'The bot is retrying failed invites.',
+    completed: 'Known failed invites were checked.',
+    failed: 'Failed invites could not be retried.',
+  },
+  run_diagnostics: {
+    title: 'Run diagnostics',
+    queued: 'The bot will collect a safe runtime health snapshot.',
+    running: 'The bot is collecting diagnostics.',
+    completed: 'Diagnostics completed.',
+    failed: 'Diagnostics failed.',
+  },
+  run_security_diagnostics: {
+    title: 'Run security diagnostics',
+    queued: 'The bot will check defensive posture and exposed controls.',
+    running: 'The bot is checking defensive posture.',
+    completed: 'Security diagnostics completed.',
+    failed: 'Security diagnostics failed.',
+  },
+  unblock_xuid: {
+    title: 'Unblock player XUID',
+    queued: 'The bot will remove this XUID from the blocklist.',
+    running: 'The bot is updating the player blocklist.',
+    completed: 'The player was unblocked and policy was reloaded.',
+    failed: 'The player could not be unblocked.',
+  },
+};
+
+function actionTitle(actionType: string): string {
+  return actionText[actionType]?.title ?? humanizeName(actionType);
+}
+
+function actionStatusText(actionType: string, status: BotAction['status'], message: string | null): string {
+  const fallback = actionText[actionType]?.[status] ?? `${actionTitle(actionType)} is ${status}.`;
+  return message ? `${fallback} ${message}` : fallback;
+}
+
+function fixLogText(log: FixLog): string {
+  return actionStatusText(log.actionType, log.status === 'completed' ? 'completed' : 'failed', log.message);
+}
+
+function errorTitle(error: BotError): string {
+  const titles: Record<string, string> = {
+    auth_expired: 'Xbox login expired',
+    config_invalid: 'Saved configuration is invalid',
+    cooldown_stuck: 'Invite cooldown needs reset',
+    invite_failed: 'Player invite failed',
+    rta_disconnected: 'Xbox realtime connection dropped',
+    [staleSessionErrorCode]: 'Xbox session refresh failed',
+    session_stale: 'Bedrock session is stale',
+  };
+
+  return titles[error.code] ?? humanizeName(error.code);
+}
+
+function eventTitle(event: BotEvent): string {
+  const titles: Record<string, string> = {
+    friend_added: 'Friend added',
+    friend_removed: 'Friend removed',
+    friend_rejected: 'Friend policy blocked a player',
+    invite_failed: 'Invite failed',
+    invite_sent: 'Invite sent',
+    player_join: 'Player joined through the portal',
+    player_leave: 'Player left the portal',
+    session_created: 'Bedrock session published',
+    session_error: 'Session needs attention',
+    session_keepalive: 'Session health check',
+    session_recovery_completed: 'Session recovery completed',
+    session_recovery_started: 'Session recovery started',
+    session_updated: 'Bedrock session updated',
+    startup: 'Bot started',
+    shutdown: 'Bot stopped',
+  };
+
+  return titles[event.type] ?? humanizeName(event.type);
+}
+
+function eventBody(event: BotEvent): string {
+  const player = event.gamertag ? ` Player: ${event.gamertag}.` : '';
+  return `${event.message}${player}`;
+}
+
+function eventTone(type: string): 'blue' | 'green' | 'red' | 'yellow' | 'neutral' {
+  if (type.includes('failed') || type.includes('error')) {
+    return 'red';
+  }
+  if (type.includes('recovery_started') || type.includes('rejected')) {
+    return 'yellow';
+  }
+  if (type.includes('sent') || type.includes('join') || type.includes('completed') || type.includes('keepalive')) {
+    return 'green';
+  }
+  if (type.includes('startup') || type.includes('created') || type.includes('updated')) {
+    return 'blue';
+  }
+  return 'neutral';
+}
+
+function humanizeName(value: string): string {
+  return value
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 const adminHelper = createColumnHelper<AdminUser>();
 const adminUserColumns = [
   adminHelper.accessor('email', { header: 'Email' }),
@@ -439,13 +685,6 @@ const adminUserColumns = [
   adminHelper.accessor('permissions', { header: 'Permissions', cell: (info) => info.getValue().join(', ') || 'read only' }),
   adminHelper.accessor('passwordSetAt', { header: 'Password', cell: (info) => <Badge tone={info.getValue() ? 'green' : 'yellow'}>{info.getValue() ? 'set' : 'pending'}</Badge> }),
   adminHelper.accessor('lastSeenAt', { header: 'Last seen', cell: (info) => formatDate(info.getValue()) }),
-];
-
-const eventColumns = [
-  eventHelper.accessor('type', { header: 'Type' }),
-  eventHelper.accessor('message', { header: 'Message' }),
-  eventHelper.accessor('gamertag', { header: 'Player', cell: (info) => info.getValue() ?? 'System' }),
-  eventHelper.accessor('createdAt', { header: 'Time', cell: (info) => formatDate(info.getValue()) }),
 ];
 
 const securityHelper = createColumnHelper<SecurityEvent>();
@@ -459,24 +698,24 @@ const securityColumns = [
 
 const fixHelper = createColumnHelper<FixLog>();
 const fixLogColumns = [
-  fixHelper.accessor('actionType', { header: 'Action' }),
+  fixHelper.accessor('actionType', { header: 'Command', cell: (info) => actionTitle(info.getValue()) }),
   fixHelper.accessor('status', { header: 'Status', cell: (info) => <Badge tone={info.getValue() === 'completed' ? 'green' : 'red'}>{info.getValue()}</Badge> }),
-  fixHelper.accessor('message', { header: 'Message' }),
+  fixHelper.accessor('message', { header: 'What happened', cell: (info) => actionStatusText(info.row.original.actionType, info.row.original.status === 'completed' ? 'completed' : 'failed', info.getValue()) }),
   fixHelper.accessor('createdAt', { header: 'Time', cell: (info) => formatDate(info.getValue()) }),
 ];
 
 const actionHelper = createColumnHelper<BotAction>();
 function createActionColumns(showInviteLinks: boolean) {
   return [
-  actionHelper.accessor('actionType', { header: 'Action' }),
+  actionHelper.accessor('actionType', { header: 'Command', cell: (info) => actionTitle(info.getValue()) }),
   actionHelper.accessor('status', { header: 'Status', cell: (info) => <Badge tone={info.getValue() === 'completed' ? 'green' : info.getValue() === 'failed' ? 'red' : 'blue'}>{info.getValue()}</Badge> }),
   actionHelper.accessor('message', {
-    header: 'Result',
+    header: 'What happened',
     cell: (info) => {
       const action = info.row.original;
       return (
         <div className="flex flex-wrap items-center gap-2">
-          <span>{info.getValue() ?? 'Pending'}</span>
+          <span>{actionStatusText(action.actionType, action.status, info.getValue())}</span>
           {showInviteLinks && action.manualInviteLink ? (
             <Button type="button" variant="subtle" onClick={() => void navigator.clipboard.writeText(action.manualInviteLink ?? '')}>
               <MailPlus size={14} />

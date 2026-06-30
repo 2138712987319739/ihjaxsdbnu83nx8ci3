@@ -5,11 +5,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DashboardData } from '@/types/admin';
 import { getPublicEnv } from '@/lib/env';
 import { getSupabaseClient } from '@/lib/supabase';
+import { queueBotAction } from '@/lib/actions';
 import { defaultConfig, sampleDashboardData } from '@/lib/sample-data';
 
 type SupabaseRecord = Record<string, unknown>;
 
 const HEARTBEAT_FRESH_MS = 90000;
+const PANEL_KEEPALIVE_MS = 5 * 60 * 1000;
 
 export function useDashboardData(enabled: boolean) {
   const queryClient = useQueryClient();
@@ -44,6 +46,22 @@ export function useDashboardData(enabled: boolean) {
       void supabase.removeChannel(channel);
     };
   }, [botId, enabled, queryClient, supabase]);
+
+  useEffect(() => {
+    if (!enabled || !supabase) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      void queueBotAction('keepalive_ping', { source: 'admin_panel', scheduled: true }).catch(() => undefined);
+    }, PANEL_KEEPALIVE_MS);
+
+    return () => clearInterval(timer);
+  }, [enabled, supabase]);
 
   return useQuery({
     queryKey: ['dashboard', botId],
@@ -208,6 +226,7 @@ function mapConfig(row: SupabaseRecord | null): DashboardData['config'] {
     friendCheckIntervalMs: numberValue(config.friendCheckIntervalMs, defaultConfig.friendCheckIntervalMs),
     friendAddIntervalMs: numberValue(config.friendAddIntervalMs, defaultConfig.friendAddIntervalMs),
     friendRemoveIntervalMs: numberValue(config.friendRemoveIntervalMs, defaultConfig.friendRemoveIntervalMs),
+    keepaliveIntervalMs: numberValue(config.keepaliveIntervalMs, defaultConfig.keepaliveIntervalMs),
   };
 }
 

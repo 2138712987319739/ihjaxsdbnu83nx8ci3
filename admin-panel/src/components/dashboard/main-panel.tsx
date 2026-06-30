@@ -28,6 +28,7 @@ const numericFields = {
   friendCheckIntervalMs: { min: 5000, max: 3600000 },
   friendAddIntervalMs: { min: 1000, max: 600000 },
   friendRemoveIntervalMs: { min: 1000, max: 600000 },
+  keepaliveIntervalMs: { min: 120000, max: 300000 },
 } as const;
 
 export function MainPanel({ data, configured }: MainPanelProps) {
@@ -175,6 +176,9 @@ export function MainPanel({ data, configured }: MainPanelProps) {
                     </Field>
                     <Field label="Invite cooldown ms" error={formState.errors.inviteCooldownMs?.message}>
                       <Input type="number" {...numericFields.inviteCooldownMs} {...register('inviteCooldownMs', { valueAsNumber: true })} />
+                    </Field>
+                    <Field label="Session check ms" error={formState.errors.keepaliveIntervalMs?.message}>
+                      <Input type="number" {...numericFields.keepaliveIntervalMs} {...register('keepaliveIntervalMs', { valueAsNumber: true })} />
                     </Field>
                   </PanelBlock>
                 </div>

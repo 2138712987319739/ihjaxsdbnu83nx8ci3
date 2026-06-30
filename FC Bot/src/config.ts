@@ -33,6 +33,7 @@ export type RuntimeConfig = {
   friendAddIntervalMs: number;
   friendRemoveIntervalMs: number;
   inviteCooldownMs: number;
+  keepaliveIntervalMs: number;
   logLevel: LogLevel;
   admin: AdminBridgeConfig;
 };
@@ -86,6 +87,7 @@ const defaults = {
   friendAddIntervalMs: '5000',
   friendRemoveIntervalMs: '2500',
   inviteCooldownMs: '90000',
+  keepaliveIntervalMs: '300000',
   logLevel: 'info',
   adminEnabled: '',
   adminSupabaseUrl: '',
@@ -141,6 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     friendAddIntervalMs: readInteger(env, 'FRACTURE_FRIEND_ADD_INTERVAL_MS', defaults.friendAddIntervalMs, 1000, 600000),
     friendRemoveIntervalMs: readInteger(env, 'FRACTURE_FRIEND_REMOVE_INTERVAL_MS', defaults.friendRemoveIntervalMs, 1000, 600000),
     inviteCooldownMs: readInteger(env, 'FRACTURE_INVITE_COOLDOWN_MS', defaults.inviteCooldownMs, 10000, 3600000),
+    keepaliveIntervalMs: readInteger(env, 'FRACTURE_KEEPALIVE_INTERVAL_MS', defaults.keepaliveIntervalMs, 120000, 300000),
     logLevel: readLogLevel(env, 'LOG_LEVEL', defaults.logLevel),
     admin,
   };
@@ -243,6 +246,10 @@ export function normalizeRemoteConfigPatch(input: unknown): RemoteConfigPatch {
 
   if ('inviteCooldownMs' in input) {
     patch.inviteCooldownMs = readIntegerValue(input.inviteCooldownMs, 'inviteCooldownMs', 10000, 3600000);
+  }
+
+  if ('keepaliveIntervalMs' in input) {
+    patch.keepaliveIntervalMs = readIntegerValue(input.keepaliveIntervalMs, 'keepaliveIntervalMs', 120000, 300000);
   }
 
   return patch;

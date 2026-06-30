@@ -31,6 +31,7 @@ export type BotConfig = {
   friendCheckIntervalMs: number;
   friendAddIntervalMs: number;
   friendRemoveIntervalMs: number;
+  keepaliveIntervalMs: number;
 };
 
 export type BotStatus = {

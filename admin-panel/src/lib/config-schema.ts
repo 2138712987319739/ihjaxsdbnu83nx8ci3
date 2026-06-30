@@ -37,6 +37,7 @@ export const configSchema = z.object({
   friendCheckIntervalMs: z.number().int().min(5000).max(3600000),
   friendAddIntervalMs: z.number().int().min(1000).max(600000),
   friendRemoveIntervalMs: z.number().int().min(1000).max(600000),
+  keepaliveIntervalMs: z.number().int().min(120000).max(300000),
 });
 
 export function parseListText(value: string): string[] {

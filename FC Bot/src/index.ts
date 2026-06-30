@@ -55,6 +55,13 @@ process.on('SIGTERM', () => {
   void shutdown('SIGTERM').finally(() => process.exit(0));
 });
 process.on('unhandledRejection', (reason: unknown) => {
+  if (service.handleRuntimeRejection(reason)) {
+    logger.warn('Recovered stale Xbox session rejection', {
+      error: getErrorMessage(reason),
+    });
+    return;
+  }
+
   unhandledRejectionCount++;
   logger.error('Unhandled promise rejection', {
     error: getErrorMessage(reason),

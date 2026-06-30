@@ -13,6 +13,7 @@ export type BotActionType =
   | 'disable_lockdown'
   | 'enable_lockdown'
   | 'invite_admin_user'
+  | 'keepalive_ping'
   | 'reconnect_portal'
   | 'reload_config'
   | 'republish_session'
@@ -145,5 +146,6 @@ export function configToPatch(config: BotConfig) {
     friendCheckIntervalMs: config.friendCheckIntervalMs,
     friendAddIntervalMs: config.friendAddIntervalMs,
     friendRemoveIntervalMs: config.friendRemoveIntervalMs,
+    keepaliveIntervalMs: config.keepaliveIntervalMs,
   };
 }

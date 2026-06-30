@@ -27,6 +27,7 @@ export const defaultConfig = {
   friendCheckIntervalMs: 5000,
   friendAddIntervalMs: 5000,
   friendRemoveIntervalMs: 2500,
+  keepaliveIntervalMs: 300000,
 } satisfies BotConfig;
 
 export const sampleDashboardData: DashboardData = {

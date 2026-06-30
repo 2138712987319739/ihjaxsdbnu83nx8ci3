@@ -32,6 +32,8 @@ export class FriendConnectService implements AdminServiceController {
   private inviteRetryQueue: RetryQueue<InviteRetryData>;
   private eventSink: AdminEventSink | null = null;
   private startedAt: string | null = null;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private recoveryPromise: Promise<void> | null = null;
   private totalJoins = 0;
 
   constructor(
@@ -72,6 +74,7 @@ export class FriendConnectService implements AdminServiceController {
     try {
       await portal.start();
       this.inviteRetryQueue.start();
+      this.startKeepalive();
       this.startedAt = new Date().toISOString();
       this.recordEvent({
         type: 'startup',
@@ -81,6 +84,7 @@ export class FriendConnectService implements AdminServiceController {
     } catch (error) {
       this.portal = null;
       this.inviteRetryQueue.stop();
+      this.stopKeepalive();
       await portal.end().catch((shutdownError: unknown) => {
         this.logger.warn('Portal cleanup after startup failure failed', {
           error: getErrorMessage(shutdownError),
@@ -93,6 +97,7 @@ export class FriendConnectService implements AdminServiceController {
   async stop(): Promise<void> {
     const portal = this.portal;
     this.portal = null;
+    this.stopKeepalive();
 
     if (!portal) {
       return;
@@ -105,6 +110,15 @@ export class FriendConnectService implements AdminServiceController {
     });
     this.startedAt = null;
     this.recordEvent({ type: 'shutdown', message: 'Friend connect service stopped.' });
+  }
+
+  handleRuntimeRejection(reason: unknown): boolean {
+    if (!isXboxSessionInitializationError(reason)) {
+      return false;
+    }
+
+    void this.recoverPortal('Xbox session became stale.', reason).catch(() => undefined);
+    return true;
   }
 
   getStatusSnapshot(botId: string): ServiceStatusSnapshot {
@@ -137,6 +151,8 @@ export class FriendConnectService implements AdminServiceController {
         return this.applyRemoteConfig({ lockdownMode: false });
       case 'enable_lockdown':
         return this.applyRemoteConfig({ lockdownMode: true });
+      case 'keepalive_ping':
+        return this.keepSessionAlive('admin_panel');
       case 'reconnect_portal':
         await this.restartPortal();
         return { ok: true, message: 'Portal reconnected.' };
@@ -408,8 +424,116 @@ export class FriendConnectService implements AdminServiceController {
       throw new Error('Portal is not running');
     }
 
-    const count = this.portal.getSessionMembers().size;
+    const count = Math.max(1, this.portal.getSessionMembers().size);
     await this.portal.updateMemberCount(count, this.config.worldMaxPlayers);
+  }
+
+  private startKeepalive(): void {
+    this.stopKeepalive();
+
+    this.keepaliveTimer = setInterval(() => {
+      void this.keepSessionAlive('scheduled').then((result) => {
+        if (!result.ok) {
+          this.logger.warn('Scheduled session health check failed', { message: result.message });
+        }
+      });
+    }, this.config.keepaliveIntervalMs);
+
+    this.keepaliveTimer.unref?.();
+  }
+
+  private stopKeepalive(): void {
+    if (!this.keepaliveTimer) {
+      return;
+    }
+
+    clearInterval(this.keepaliveTimer);
+    this.keepaliveTimer = null;
+  }
+
+  private async keepSessionAlive(source: 'scheduled' | 'admin_panel'): Promise<AdminActionResult> {
+    if (!this.portal) {
+      return { ok: false, message: 'Portal is not running.' };
+    }
+
+    const currentPlayers = Math.max(1, this.portal.getSessionMembers().size);
+
+    try {
+      await this.portal.updateMemberCount(currentPlayers, this.config.worldMaxPlayers);
+      this.logger.info('Session health check completed', {
+        source,
+        currentPlayers,
+        maxPlayers: this.config.worldMaxPlayers,
+      });
+      this.recordEvent({
+        type: 'session_keepalive',
+        message: 'Session health check completed.',
+        payload: { source, currentPlayers, maxPlayers: this.config.worldMaxPlayers },
+      });
+
+      return { ok: true, message: 'Session health check completed.' };
+    } catch (error) {
+      if (!isXboxSessionInitializationError(error)) {
+        const message = getErrorMessage(error);
+        this.logger.warn('Session health check failed', { source, error: message });
+        this.recordEvent({
+          type: 'session_error',
+          message: 'Session health check failed.',
+          payload: { source, error: message },
+        });
+        return { ok: false, message: 'Session health check failed.' };
+      }
+
+      try {
+        await this.recoverPortal('Xbox session health check failed.', error);
+        return { ok: true, message: 'Session was stale. Portal reconnected.' };
+      } catch (recoveryError) {
+        return {
+          ok: false,
+          message: `Session recovery failed: ${getErrorMessage(recoveryError)}`,
+        };
+      }
+    }
+  }
+
+  private async recoverPortal(reason: string, error: unknown): Promise<void> {
+    if (this.recoveryPromise) {
+      return this.recoveryPromise;
+    }
+
+    const originalError = getErrorMessage(error);
+
+    this.recoveryPromise = (async () => {
+      this.logger.warn('Recovering Bedrock session', { reason, error: originalError });
+      this.recordEvent({
+        type: 'session_recovery_started',
+        message: 'Bedrock session became stale. Reconnecting portal.',
+        payload: { reason, error: originalError },
+      });
+
+      try {
+        await this.restartPortal();
+        this.logger.info('Bedrock session recovery completed');
+        this.recordEvent({
+          type: 'session_recovery_completed',
+          message: 'Bedrock session reconnected successfully.',
+          payload: { reason },
+        });
+      } catch (recoveryError) {
+        const recoveryMessage = getErrorMessage(recoveryError);
+        this.logger.error('Bedrock session recovery failed', { error: recoveryMessage });
+        this.recordEvent({
+          type: 'session_error',
+          message: 'Bedrock session recovery failed.',
+          payload: { reason, error: recoveryMessage },
+        });
+        throw recoveryError;
+      } finally {
+        this.recoveryPromise = null;
+      }
+    })();
+
+    return this.recoveryPromise;
   }
 
   private async applyRemoteConfig(payload: unknown): Promise<AdminActionResult> {
@@ -540,6 +664,12 @@ function readXuidPayload(payload: unknown): string | null {
   }
 
   return value;
+}
+
+function isXboxSessionInitializationError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('member initialization')
+    || (message.includes('initialize') && message.includes('member reservations'));
 }
 
 function isSameConfigValue(left: unknown, right: unknown): boolean {

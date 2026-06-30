@@ -15,6 +15,7 @@ export const ACTION_RATE_LIMITS: Record<string, { windowMs: number; max: number 
   disable_lockdown: { windowMs: 60000, max: 4 },
   enable_lockdown: { windowMs: 60000, max: 4 },
   invite_admin_user: { windowMs: 60000, max: 4 },
+  keepalive_ping: { windowMs: 60000, max: 4 },
   reconnect_portal: { windowMs: 60000, max: 3 },
   republish_session: { windowMs: 60000, max: 8 },
   run_diagnostics: { windowMs: 60000, max: 12 },

@@ -32,6 +32,7 @@ const supportedActions = new Set<AdminActionType>([
   'disable_lockdown',
   'enable_lockdown',
   'invite_admin_user',
+  'keepalive_ping',
   'reconnect_portal',
   'reload_config',
   'republish_session',
@@ -165,6 +166,26 @@ export class AdminBridge implements AdminEventSink {
         fix_action: 'retry_failed_invites',
         payload: event.payload ?? {},
       });
+    }
+
+    if (event.type === 'session_error') {
+      await this.client.from('bot_errors').insert({
+        bot_id: this.config.botId,
+        code: 'session_refresh_failed',
+        message: event.message,
+        severity: 'warning',
+        fix_action: 'reconnect_portal',
+        payload: event.payload ?? {},
+      });
+    }
+
+    if (event.type === 'session_recovery_completed') {
+      await this.client
+        .from('bot_errors')
+        .update({ status: 'resolved', acknowledged_at: new Date().toISOString() })
+        .eq('bot_id', this.config.botId)
+        .eq('code', 'session_refresh_failed')
+        .eq('status', 'open');
     }
 
     if (event.type === 'friend_rejected') {

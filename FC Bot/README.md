@@ -39,6 +39,8 @@ On first start, complete the Microsoft device login shown in the terminal. The a
 
 The session card publishes the world name as `FractureMC`. Minecraft formatting codes are rejected so Bedrock clients do not display raw formatting characters.
 
+The service checks the Xbox session every five minutes by default. Set `FRACTURE_KEEPALIVE_INTERVAL_MS` between `120000` and `300000` to tune that interval. The admin panel can also queue a manual session check from Developer controls.
+
 ## Operations
 
 ```sh
@@ -101,9 +103,9 @@ If SMTP is not configured and Supabase email quota is blocked, the bridge genera
 
 The panel queues allowlisted actions only. It does not expose shell execution, file editing, package updates, or free-form backend commands.
 
-The Main section can update the safe runtime surface: Bedrock target, session text, display name, joinability, world max players, invite cooldown, presence updates, friend automation, add-back timing, friend policy, allowlists, blocklists, and lockdown mode. Xbox account profile images and gamertag changes still have to be made on the Microsoft account itself.
+The Main section can update the safe runtime surface: Bedrock target, session text, display name, joinability, world max players, invite cooldown, session health check timing, presence updates, friend automation, add-back timing, friend policy, allowlists, blocklists, and lockdown mode. Xbox account profile images and gamertag changes still have to be made on the Microsoft account itself.
 
-The Developer section includes defensive controls for diagnostics, republishing the session, reconnecting the portal, clearing invite cooldown state, retrying known invite failures, toggling lockdown, blocking or unblocking XUIDs, and reviewing security events. It does not perform retaliation or run arbitrary commands.
+The Developer section includes defensive controls for diagnostics, checking session health, republishing the session, reconnecting the portal, clearing invite cooldown state, retrying known invite failures, toggling lockdown, blocking or unblocking XUIDs, and reviewing security events. It does not perform retaliation or run arbitrary commands.
 
 ## Geyser And Floodgate
 

@@ -10,6 +10,7 @@ export type AdminActionType =
   | 'disable_lockdown'
   | 'enable_lockdown'
   | 'invite_admin_user'
+  | 'keepalive_ping'
   | 'reconnect_portal'
   | 'reload_config'
   | 'republish_session'
@@ -45,6 +46,10 @@ export type ServiceEventType =
   | 'player_join'
   | 'player_leave'
   | 'session_created'
+  | 'session_error'
+  | 'session_keepalive'
+  | 'session_recovery_completed'
+  | 'session_recovery_started'
   | 'session_updated'
   | 'startup'
   | 'shutdown';
