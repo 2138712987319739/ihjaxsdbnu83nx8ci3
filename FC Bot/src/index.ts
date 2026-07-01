@@ -1,3 +1,42 @@
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+/**
+ * Self-healing: Ensure native modules match the current OS.
+ * This fixes the "invalid ELF header" error caused by uploading Mac files to Linux.
+ */
+try {
+  const nodeModulesPath = join(process.cwd(), 'node_modules');
+  const datachannelPath = join(nodeModulesPath, 'node-datachannel');
+  let needsInstall = !existsSync(nodeModulesPath);
+
+  if (!needsInstall && existsSync(datachannelPath)) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('node-datachannel');
+    } catch (error: any) {
+      if (
+        error.message?.includes('invalid ELF header') ||
+        error.message?.includes('invalid arch') ||
+        error.message?.includes('module was compiled against a different Node.js version') ||
+        error.message?.includes('Cannot find module')
+      ) {
+        console.log('Detected incompatible native modules. Reinstalling for current system...');
+        needsInstall = true;
+      }
+    }
+  }
+
+  if (needsInstall) {
+    console.log('Updating dependencies (this may take a minute)...');
+    execSync('npm install --omit=dev', { stdio: 'inherit' });
+    console.log('Dependencies updated successfully.');
+  }
+} catch (error: any) {
+  console.error('Self-healing failed:', error.message);
+}
+
 import { FriendConnectService, isXboxSessionInitializationError } from './service';
 import { AdminBridge } from './admin/bridge';
 import { loadConfig, loadEnvFile } from './config';
