@@ -1,255 +1,68 @@
+// Website or admin panel made by Clovic.
 'use client';
 
-import { Text } from '@react-three/drei';
+import { Float, Stars } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Group, Mesh, MeshBasicMaterial } from 'three';
-
-type Pulse = {
-  id: number;
-  startedAt: number;
-};
-
-const tracePath = [
-  [-3.38, -0.78, 0.08],
-  [-3.38, 1.02, 0.08],
-  [-2.12, 1.02, 0.08],
-  [-3.38, 0.18, 0.08],
-  [-2.34, 0.18, 0.08],
-  [-1.56, -0.78, 0.08],
-  [-1.18, 1.02, 0.08],
-  [-0.48, -0.42, 0.08],
-  [0.23, 1.02, 0.08],
-  [0.62, -0.78, 0.08],
-  [1.48, 0.86, 0.08],
-  [2.64, 1.02, 0.08],
-  [1.48, 0.86, 0.08],
-  [1.36, -0.46, 0.08],
-  [2.62, -0.72, 0.08],
-] as const;
+import { gsap } from 'gsap';
+import { useEffect, useRef } from 'react';
+import type { Mesh } from 'three';
 
 export function PortalScene({ online }: { online: boolean }) {
-  const [pulses, setPulses] = useState<Pulse[]>([]);
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const nextPulse = useRef(0);
-
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReducedMotion(query.matches);
-
-    function updatePreference() {
-      setReducedMotion(query.matches);
-    }
-
-    query.addEventListener('change', updatePreference);
-    return () => query.removeEventListener('change', updatePreference);
-  }, []);
-
-  useEffect(() => {
-    if (reducedMotion) {
-      return;
-    }
-
-    function addPulse() {
-      const id = nextPulse.current;
-      nextPulse.current += 1;
-      setPulses((current) => [...current.slice(-7), { id, startedAt: performance.now() }]);
-      window.setTimeout(() => {
-        setPulses((current) => current.filter((pulse) => pulse.id !== id));
-      }, 1400);
-    }
-
-    window.addEventListener('pointerdown', addPulse);
-    return () => window.removeEventListener('pointerdown', addPulse);
-  }, [reducedMotion]);
-
   return (
     <Canvas
-      camera={{ position: [0, 0, 7.5], fov: 42 }}
+      camera={{ position: [0, 0, 7], fov: 48 }}
       gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
       dpr={[1, 1.5]}
     >
-      <ambientLight intensity={1.05} />
-      <directionalLight position={[3.4, 4.2, 4]} intensity={1.5} color="#dbeafe" />
-      <pointLight position={[-3.8, -2.1, 2.4]} intensity={2.15} color="#ff315d" />
-      <pointLight position={[4.2, 1.8, 2.8]} intensity={2.35} color="#1f7aff" />
-      <FmcMark online={online} pulses={pulses} reducedMotion={reducedMotion} />
+      <ambientLight intensity={0.72} />
+      <pointLight position={[4, 3, 3]} intensity={1.8} color="#2777ff" />
+      <pointLight position={[-4, -3, 2]} intensity={1.25} color="#ff3f5f" />
+      <Stars radius={48} depth={18} count={900} factor={3.2} saturation={0.8} fade speed={0.4} />
+      <Float speed={1.4} rotationIntensity={0.35} floatIntensity={0.6}>
+        <PortalCore online={online} />
+      </Float>
     </Canvas>
   );
 }
 
-function FmcMark({ online, pulses, reducedMotion }: { online: boolean; pulses: Pulse[]; reducedMotion: boolean }) {
-  const groupRef = useRef<Group>(null);
-  const pointer = useRef({ x: 0, y: 0 });
-  const origin = useMemo(() => ({ x: 1.92, y: -0.04, z: -2.8 }), []);
+function PortalCore({ online }: { online: boolean }) {
+  const meshRef = useRef<Mesh>(null);
+  const ringRef = useRef<Mesh>(null);
 
   useEffect(() => {
-    if (reducedMotion) {
+    if (!meshRef.current) {
       return;
     }
 
-    function move(event: PointerEvent) {
-      pointer.current = {
-        x: event.clientX / window.innerWidth - 0.5,
-        y: event.clientY / window.innerHeight - 0.5,
-      };
-    }
-
-    window.addEventListener('pointermove', move);
-    return () => window.removeEventListener('pointermove', move);
-  }, [reducedMotion]);
+    gsap.to(meshRef.current.scale, {
+      x: online ? 1.18 : 0.95,
+      y: online ? 1.18 : 0.95,
+      z: online ? 1.18 : 0.95,
+      duration: 0.55,
+      ease: 'power2.out',
+    });
+  }, [online]);
 
   useFrame((_state, delta) => {
-    if (reducedMotion) {
-      return;
+    if (meshRef.current) {
+      meshRef.current.rotation.x += delta * 0.12;
+      meshRef.current.rotation.y += delta * 0.18;
     }
-
-    const group = groupRef.current;
-    if (!group) {
-      return;
+    if (ringRef.current) {
+      ringRef.current.rotation.z -= delta * 0.16;
     }
-
-    const lift = online ? 0.08 : -0.04;
-    group.rotation.y += (pointer.current.x * 0.16 - group.rotation.y) * delta * 3.4;
-    group.rotation.x += (-pointer.current.y * 0.08 - group.rotation.x) * delta * 3.4;
-    group.position.x += (origin.x + pointer.current.x * 0.42 - group.position.x) * delta * 2.4;
-    group.position.y += (origin.y + lift - pointer.current.y * 0.18 - group.position.y) * delta * 2.4;
   });
 
   return (
-    <group ref={groupRef} position={[origin.x, origin.y, origin.z]} rotation={[0, -0.12, 0]} scale={[0.92, 0.92, 0.92]}>
-      <Text
-        anchorX="center"
-        anchorY="middle"
-        fontSize={3.2}
-        letterSpacing={-0.065}
-        position={[0, 0.08, 0]}
-      >
-        FMC
-        <meshStandardMaterial
-          color={online ? '#8fc4ff' : '#617797'}
-          emissive={online ? '#153b84' : '#07162c'}
-          metalness={0.18}
-          roughness={0.34}
-          transparent
-          opacity={online ? 0.24 : 0.16}
-        />
-      </Text>
-      <Text
-        anchorX="center"
-        anchorY="middle"
-        fontSize={0.32}
-        letterSpacing={0.18}
-        position={[0.02, -1.78, 0.06]}
-      >
-        FRACTURE MC
-        <meshBasicMaterial color={online ? '#ff7f9a' : '#64748b'} transparent opacity={0.34} />
-      </Text>
-      <LogoSkeleton online={online} />
-      {pulses.map((pulse) => (
-        <TracePulse key={pulse.id} startedAt={pulse.startedAt} />
-      ))}
+    <group position={[3.8, 0.2, -1.5]}>
+      <mesh ref={meshRef}>
+        <icosahedronGeometry args={[1.28, 1]} />
+        <meshStandardMaterial color={online ? '#2777ff' : '#334155'} emissive={online ? '#174ea6' : '#111827'} roughness={0.38} metalness={0.22} wireframe />
+      </mesh>
+      <mesh ref={ringRef}>
+        <torusGeometry args={[2.1, 0.025, 12, 96]} />
+        <meshStandardMaterial color="#ff3f5f" emissive="#7f1d1d" />
+      </mesh>
     </group>
   );
-}
-
-function LogoSkeleton({ online }: { online: boolean }) {
-  const segments = useMemo(() => toSegments(tracePath), []);
-
-  return (
-    <group position={[0, 0.04, 0.14]}>
-      {segments.map((segment, index) => (
-        <StaticSegment
-          key={`${segment.start.join(':')}-${index}`}
-          start={segment.start}
-          end={segment.end}
-          online={online}
-        />
-      ))}
-    </group>
-  );
-}
-
-function StaticSegment({ start, end, online }: { start: Point; end: Point; online: boolean }) {
-  const segment = useMemo(() => segmentMetrics(start, end), [end, start]);
-
-  return (
-    <mesh position={segment.center} rotation={[0, 0, segment.angle]} scale={[segment.length, 1, 1]}>
-      <boxGeometry args={[1, 0.012, 0.012]} />
-      <meshBasicMaterial color={online ? '#ff9db0' : '#6f83a5'} transparent opacity={online ? 0.10 : 0.06} />
-    </mesh>
-  );
-}
-
-function TracePulse({ startedAt }: { startedAt: number }) {
-  const segments = useMemo(() => toSegments(tracePath), []);
-
-  return (
-    <group position={[0, 0.04, 0.2]}>
-      {segments.map((segment, index) => (
-        <TraceSegment
-          key={`${startedAt}-${index}`}
-          start={segment.start}
-          end={segment.end}
-          index={index}
-          startedAt={startedAt}
-        />
-      ))}
-    </group>
-  );
-}
-
-function TraceSegment({ start, end, index, startedAt }: { start: Point; end: Point; index: number; startedAt: number }) {
-  const meshRef = useRef<Mesh>(null);
-  const materialRef = useRef<MeshBasicMaterial>(null);
-  const segment = useMemo(() => segmentMetrics(start, end), [end, start]);
-
-  useFrame(() => {
-    const mesh = meshRef.current;
-    const material = materialRef.current;
-    if (!mesh || !material) {
-      return;
-    }
-
-    const elapsed = (performance.now() - startedAt) / 1000 - index * 0.025;
-    const progress = clamp(elapsed / 0.18, 0, 1);
-    const fade = clamp(1 - (elapsed - 0.2) / 0.62, 0, 1);
-    mesh.scale.x = segment.length * progress;
-    mesh.position.set(
-      start[0] + segment.direction[0] * segment.length * progress * 0.5,
-      start[1] + segment.direction[1] * segment.length * progress * 0.5,
-      start[2] + segment.direction[2] * segment.length * progress * 0.5,
-    );
-    material.opacity = progress <= 0 ? 0 : 0.58 * fade;
-  });
-
-  return (
-    <mesh ref={meshRef} rotation={[0, 0, segment.angle]}>
-      <boxGeometry args={[1, 0.026, 0.026]} />
-      <meshBasicMaterial ref={materialRef} color="#ffffff" transparent opacity={0} />
-    </mesh>
-  );
-}
-
-type Point = readonly [number, number, number];
-
-function toSegments(points: readonly Point[]) {
-  return points.slice(0, -1).map((start, index) => ({ start, end: points[index + 1] }));
-}
-
-function segmentMetrics(start: Point, end: Point) {
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  const dz = end[2] - start[2];
-  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  return {
-    angle: Math.atan2(dy, dx),
-    center: [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2] as [number, number, number],
-    direction: [dx / length, dy / length, dz / length] as [number, number, number],
-    length,
-  };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

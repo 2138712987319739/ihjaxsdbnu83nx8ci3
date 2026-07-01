@@ -1,10 +1,11 @@
+// Website or admin panel made by Clovic.
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <section
-      className={cn('ops-surface rounded-lg', className)}
+      className={cn('rounded-lg border border-border bg-card/84 shadow-xl shadow-black/20 backdrop-blur', className)}
       {...props}
     />
   );

@@ -188,7 +188,7 @@ export class FriendConnectService implements AdminServiceController {
       case 'clear_invite_cooldown':
         this.inviteCache.clear();
         return { ok: true, message: 'Invite cooldown cache cleared.' };
-      case 'keepalive':
+      case 'keepalive_ping':
         return this.runKeepaliveAction();
       case 'disable_lockdown':
         return this.applyRemoteConfig({ lockdownMode: false });
@@ -208,14 +208,7 @@ export class FriendConnectService implements AdminServiceController {
           data: { queueSize: this.inviteRetryQueue.size() },
         };
       case 'run_diagnostics':
-        return {
-          ok: true,
-          message: 'Diagnostics completed.',
-          data: {
-            ...this.getStatusSnapshot(this.config.admin.botId),
-            sessionKeepaliveIntervalMs: this.config.sessionKeepaliveIntervalMs,
-          },
-        };
+        return this.runDiagnostics();
       case 'run_security_diagnostics':
         return {
           ok: true,
@@ -513,6 +506,40 @@ export class FriendConnectService implements AdminServiceController {
       'manual republish',
       'Session republished. The Minecraft session card and player count were refreshed.',
     );
+  }
+
+  private async runDiagnostics(): Promise<AdminActionResult> {
+    const config = this.config;
+    const status = this.getStatusSnapshot(config.admin.botId);
+    const steps: string[] = [
+      `Checked bot status: ${status.online ? 'Online' : 'Offline'}`,
+      `Target server: ${config.bedrockHost}:${config.bedrockPort}`,
+    ];
+
+    try {
+      const { lookup } = await import('node:dns/promises');
+      const address = await lookup(config.bedrockHost);
+      steps.push(`DNS: ${config.bedrockHost} resolves to ${address.address}`);
+    } catch (error) {
+      steps.push(`DNS FAILED: Could not resolve ${config.bedrockHost}`);
+    }
+
+    // We can't easily ping UDP in a quick diagnostic, but we can verify the session
+    if (this.portal) {
+      steps.push('Xbox Session: Portal is active');
+    } else {
+      steps.push('Xbox Session: Portal is NOT active');
+    }
+
+    return {
+      ok: true,
+      message: 'Diagnostics completed. Check the steps for connectivity details.',
+      data: {
+        ...status,
+        steps,
+        consoleText: [`[DIAGNOSTICS]`, ...steps.map(s => ` > ${s}`)].join('\n'),
+      },
+    };
   }
 
   private async runKeepaliveAction(): Promise<AdminActionResult> {

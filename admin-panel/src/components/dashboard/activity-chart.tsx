@@ -1,3 +1,4 @@
+// Website or admin panel made by Clovic.
 'use client';
 
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';

@@ -29,7 +29,7 @@ const supportedActions = new Set<AdminActionType>([
   'clear_stale_actions',
   'disable_lockdown',
   'enable_lockdown',
-  'keepalive',
+  'keepalive_ping',
   'reconnect_portal',
   'reload_config',
   'republish_session',

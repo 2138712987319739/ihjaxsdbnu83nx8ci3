@@ -1,22 +1,33 @@
+import { MINECRAFT_COLORS } from './constants';
+
 export type BrandConfig = {
   useColors: boolean;
   bedrockHost: string;
 };
 
-export function getBrandDisplay(_useColors: boolean): string {
-  void _useColors;
-  return 'FractureMC';
+/**
+ * Get the branded display name for Fracture MC
+ * @param useColors - Whether to include Minecraft color formatting codes
+ * @returns Formatted brand name (with or without colors)
+ */
+export function getBrandDisplay(useColors: boolean): string {
+  if (!useColors) {
+    return 'Fracture MC';
+  }
+
+  // Format: "Fracture" in blue, "MC" in red
+  return `${MINECRAFT_COLORS.BLUE}Fracture ${MINECRAFT_COLORS.RED}MC${MINECRAFT_COLORS.RESET}`;
 }
 
-export function getSessionText(value: string, _useColors: boolean): string {
-  void _useColors;
-  return stripMinecraftFormatting(value).replace(/Fracture\s*MC/gi, 'FractureMC');
+export function getSessionText(value: string, useColors: boolean): string {
+  if (!useColors) {
+    return value;
+  }
+
+  return value.replace(/Fracture MC/gi, getBrandDisplay(true));
 }
 
 export function getWorldName(config: BrandConfig): string {
-  return getBrandDisplay(config.useColors);
-}
-
-function stripMinecraftFormatting(value: string): string {
-  return value.replace(/\u00a7[0-9A-FK-OR]/gi, '');
+  const display = getBrandDisplay(config.useColors);
+  return `${display} | ${config.bedrockHost}`;
 }

@@ -38,6 +38,18 @@ export type RuntimeConfig = {
   admin: AdminBridgeConfig;
 };
 
+export type AdminInviteMailerConfig = {
+  enabled: boolean;
+  host: string | null;
+  port: number;
+  secure: boolean;
+  user: string | null;
+  pass: string | null;
+  from: string | null;
+  fromName: string;
+  replyTo: string | null;
+};
+
 export type AdminBridgeConfig = {
   enabled: boolean;
   supabaseUrl: string | null;
@@ -45,6 +57,7 @@ export type AdminBridgeConfig = {
   botId: string;
   pollIntervalMs: number;
   statusIntervalMs: number;
+  inviteMailer: AdminInviteMailerConfig;
 };
 
 export type RemoteConfigPatch = Partial<Omit<RuntimeConfig, 'admin' | 'authCacheDir' | 'logLevel'>>;
@@ -82,6 +95,15 @@ const defaults = {
   adminBotId: 'fracture-main',
   adminPollIntervalMs: '5000',
   adminStatusIntervalMs: '10000',
+  adminInviteMailerEnabled: 'false',
+  adminInviteMailerHost: '',
+  adminInviteMailerPort: '465',
+  adminInviteMailerSecure: 'true',
+  adminInviteMailerUser: '',
+  adminInviteMailerPass: '',
+  adminInviteMailerFrom: '',
+  adminInviteMailerFromName: 'Fracture MC Bot',
+  adminInviteMailerReplyTo: '',
 } as const;
 
 /**
@@ -351,6 +373,17 @@ function readAdminConfig(env: NodeJS.ProcessEnv): AdminBridgeConfig {
     botId: readNonEmpty(env, 'FRIENDCONNECT_ADMIN_BOT_ID', defaults.adminBotId),
     pollIntervalMs: readInteger(env, 'FRIENDCONNECT_ADMIN_POLL_INTERVAL_MS', defaults.adminPollIntervalMs, 1000, 600000),
     statusIntervalMs: readInteger(env, 'FRIENDCONNECT_ADMIN_STATUS_INTERVAL_MS', defaults.adminStatusIntervalMs, 1000, 600000),
+    inviteMailer: {
+      enabled: readBoolean(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_ENABLED', defaults.adminInviteMailerEnabled),
+      host: readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_HOST', defaults.adminInviteMailerHost),
+      port: readInteger(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_PORT', defaults.adminInviteMailerPort, 1, 65535),
+      secure: readBoolean(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_SECURE', defaults.adminInviteMailerSecure),
+      user: readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_USER', defaults.adminInviteMailerUser),
+      pass: readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_PASS', defaults.adminInviteMailerPass),
+      from: readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_FROM', defaults.adminInviteMailerFrom),
+      fromName: readNonEmpty(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_FROM_NAME', defaults.adminInviteMailerFromName),
+      replyTo: readOptional(env, 'FRIENDCONNECT_ADMIN_INVITE_MAILER_REPLY_TO', defaults.adminInviteMailerReplyTo),
+    },
   };
 }
 

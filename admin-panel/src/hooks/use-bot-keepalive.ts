@@ -24,7 +24,7 @@ export function useBotKeepalive(enabled: boolean) {
       writeLastKeepalive(now);
 
       try {
-        await queueBotAction('keepalive_ping', {
+        await queueBotAction('keepalive', {
           source: 'admin_panel',
           requestedAt: new Date(now).toISOString(),
           intervalMs: PANEL_KEEPALIVE_INTERVAL_MS,

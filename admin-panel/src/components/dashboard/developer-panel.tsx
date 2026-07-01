@@ -21,7 +21,6 @@ import { getDefenseSignal, securityMachine } from '@/store/security-machine';
 type DeveloperPanelProps = {
   data: DashboardData;
   configured: boolean;
-  profile?: any;
 };
 
 type ConsoleLine = {
@@ -42,7 +41,7 @@ const knownFixes: Record<string, BotActionType> = {
 };
 
 const fixActions = [
-  'keepalive_ping',
+  'keepalive',
   'run_diagnostics',
   'republish_session',
   'reconnect_portal',
@@ -78,11 +77,6 @@ const actionCopy: Record<BotActionType, { label: string; description: string; qu
     description: 'Closes commands that were left queued or running too long.',
     queued: 'The bridge will close stale commands so the queue stays readable.',
   },
-  create_admin_account: {
-    label: 'Create admin account',
-    description: 'Creates a new admin account with specified role.',
-    queued: 'The bot will create the admin account.',
-  },
   disable_lockdown: {
     label: 'Disable lockdown',
     description: 'Returns the bot to the normal friend policy.',
@@ -93,12 +87,7 @@ const actionCopy: Record<BotActionType, { label: string; description: string; qu
     description: 'Allows only approved players through policy checks.',
     queued: 'The bot will turn lockdown mode on.',
   },
-  invite_admin_user: {
-    label: 'Invite admin user',
-    description: 'Invites a new user to the admin panel.',
-    queued: 'The bot will send an invitation email.',
-  },
-  keepalive_ping: {
+  keepalive: {
     label: 'Ping bot session',
     description: 'Refreshes the Xbox session heartbeat and player count.',
     queued: 'The bot will refresh the Xbox session heartbeat.',
@@ -146,7 +135,7 @@ const securityActions = [
   'disable_lockdown',
 ] as const satisfies readonly BotActionType[];
 
-export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProps) {
+export function DeveloperPanel({ data, configured }: DeveloperPanelProps) {
   const [activeTab, setActiveTab] = useState('console');
   const [blockXuid, setBlockXuid] = useState('');
   const [message, setMessage] = useState('');

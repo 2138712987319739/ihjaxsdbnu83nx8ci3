@@ -1,3 +1,4 @@
+// Website or admin panel made by Clovic.
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
