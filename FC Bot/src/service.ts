@@ -43,6 +43,7 @@ type SessionMemberUpdate = {
         };
         custom?: {
           protocol?: number;
+          netherNetEnabled?: boolean;
         };
       };
       properties: {
@@ -735,6 +736,24 @@ export class FriendConnectService implements AdminServiceController {
 
     rest.updateSession = async (sessionName: string, payload: any): Promise<unknown> => {
       const xuid = host.profile?.xuid;
+
+      // Harden session capabilities and properties if they are present in the payload
+      if (payload.capabilities || payload.properties) {
+        payload.capabilities = {
+          ...(payload.capabilities ?? {}),
+          connectivity: true,
+          multiplayer: true,
+        };
+        payload.properties = {
+          ...(payload.properties ?? {}),
+          system: {
+            ...(payload.properties?.system ?? {}),
+            peerToPeerEnabled: true,
+            crossPlayEnabled: true,
+          },
+        };
+      }
+
       if (xuid && payload?.members?.me) {
         // Ensure initialize constant is always present in any 'me' member update
         payload.members.me.constants = {
@@ -745,12 +764,14 @@ export class FriendConnectService implements AdminServiceController {
             initialize: true,
           },
         };
-        // Add protocol constant which helps with NetherNet connectivity on some versions
+        // Add protocol and NetherNet constants which help with connectivity
         if (!payload.members.me.constants.custom) {
           payload.members.me.constants.custom = {};
         }
         payload.members.me.constants.custom.protocol = 4;
-        this.logger.debug('Harden: updateSession injected constants', { sessionName });
+        payload.members.me.constants.custom.netherNetEnabled = true;
+
+        this.logger.debug('Harden: updateSession injected constants and capabilities', { sessionName });
       }
       return originalUpdateSession(sessionName, payload);
     };
@@ -866,6 +887,7 @@ function buildInitializedMemberUpdate(xuid: string, connectionId: string, subscr
           },
           custom: {
             protocol: 4,
+            netherNetEnabled: true,
           },
         },
         properties: {
