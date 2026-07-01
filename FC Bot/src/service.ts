@@ -742,26 +742,18 @@ export class FriendConnectService implements AdminServiceController {
     rest.updateSession = async (sessionName: string, payload: any): Promise<unknown> => {
       const xuid = host.profile?.xuid;
 
-      // Harden session constants and properties if they are present in the payload
-      if (payload.constants || payload.properties) {
-        if (payload.constants) {
-          payload.constants.system = {
-            ...(payload.constants.system ?? {}),
-            capabilities: {
-              ...(payload.constants.system?.capabilities ?? {}),
-              connectivity: true,
-              multiplayer: true,
-            },
-          };
-        }
-
-        if (payload.properties) {
-          payload.properties.system = {
-            ...(payload.properties.system ?? {}),
+      // Harden session constants if they are present in the payload
+      if (payload.constants) {
+        payload.constants.system = {
+          ...(payload.constants.system ?? {}),
+          capabilities: {
+            ...(payload.constants.system?.capabilities ?? {}),
+            connectivity: true,
+            multiplayer: true,
             peerToPeerEnabled: true,
             crossPlayEnabled: true,
-          };
-        }
+          },
+        };
       }
 
       if (xuid && payload?.members?.me) {
