@@ -41,6 +41,9 @@ type SessionMemberUpdate = {
           xuid: string;
           initialize: true;
         };
+        custom?: {
+          protocol?: number;
+        };
       };
       properties: {
         system: {
@@ -512,7 +515,7 @@ export class FriendConnectService implements AdminServiceController {
     const config = this.config;
     const status = this.getStatusSnapshot(config.admin.botId);
     const steps: string[] = [
-      `Checked bot status: ${status.online ? 'Online' : 'Offline'}`,
+      `Checking bot status: ${status.online ? 'Online' : 'Offline'}`,
       `Target server: ${config.bedrockHost}:${config.bedrockPort}`,
     ];
 
@@ -520,26 +523,87 @@ export class FriendConnectService implements AdminServiceController {
       const { lookup } = await import('node:dns/promises');
       const address = await lookup(config.bedrockHost);
       steps.push(`DNS: ${config.bedrockHost} resolves to ${address.address}`);
+
+      // Try a UDP Ping to see if the server is actually reachable
+      const reachable = await this.pingUDP(address.address, config.bedrockPort);
+      if (reachable) {
+        steps.push(`Network: Successfully reached the server on port ${config.bedrockPort} (UDP).`);
+      } else {
+        steps.push(`Network FAILED: Could not reach the server on port ${config.bedrockPort}. Check your Firewall or Geyser config.`);
+      }
     } catch (error) {
       steps.push(`DNS FAILED: Could not resolve ${config.bedrockHost}`);
     }
 
-    // We can't easily ping UDP in a quick diagnostic, but we can verify the session
     if (this.portal) {
-      steps.push('Xbox Session: Portal is active');
+      steps.push('Xbox Session: Active and visible to friends.');
+      const members = this.portal.getSessionMembers();
+      steps.push(`Xbox Session: ${members.size} player(s) currently in session.`);
     } else {
-      steps.push('Xbox Session: Portal is NOT active');
+      steps.push('Xbox Session: NOT active. Try "Republish session".');
     }
+
+    const consoleLines = [
+      `[DIAGNOSTICS - ${new Date().toLocaleTimeString()}]`,
+      ...steps.map(s => {
+        if (s.includes('FAILED')) return ` [!] ${s}`;
+        if (s.includes('Successfully') || s.includes('Active')) return ` [+] ${s}`;
+        return ` > ${s}`;
+      }),
+      '',
+      steps.some(s => s.includes('FAILED'))
+        ? 'Result: Issues detected. Please follow the English fix steps above.'
+        : 'Result: Everything looks perfect from the bot\'s side!',
+    ];
 
     return {
       ok: true,
-      message: 'Diagnostics completed. Check the steps for connectivity details.',
+      message: 'Diagnostics completed. Review the Fix Logs for details.',
       data: {
         ...status,
         steps,
-        consoleText: [`[DIAGNOSTICS]`, ...steps.map(s => ` > ${s}`)].join('\n'),
+        consoleText: consoleLines.join('\n'),
       },
     };
+  }
+
+  private async pingUDP(host: string, port: number): Promise<boolean> {
+    const dgram = await import('node:dgram');
+    return new Promise((resolve) => {
+      const socket = dgram.createSocket('udp4');
+      const timeout = setTimeout(() => {
+        socket.close();
+        resolve(false);
+      }, 3000);
+
+      // RakNet Unconnected Ping
+      const ping = Buffer.alloc(33);
+      ping[0] = 0x01; // ID_UNCONNECTED_PING
+      // 8 bytes time (can be 0)
+      // 16 bytes magic
+      Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex').copy(ping, 9);
+      // 8 bytes GUID (can be 0)
+
+      socket.on('message', () => {
+        clearTimeout(timeout);
+        socket.close();
+        resolve(true);
+      });
+
+      socket.on('error', () => {
+        clearTimeout(timeout);
+        socket.close();
+        resolve(false);
+      });
+
+      socket.send(ping, port, host, (err) => {
+        if (err) {
+          clearTimeout(timeout);
+          socket.close();
+          resolve(false);
+        }
+      });
+    });
   }
 
   private async runKeepaliveAction(): Promise<AdminActionResult> {
@@ -655,13 +719,18 @@ export class FriendConnectService implements AdminServiceController {
       const xuid = host.profile?.xuid;
       const subscriptionId = host.subscriptionId;
 
-      if (!xuid || !subscriptionId) {
+      try {
+        // Try the original method first
         await originalUpdateConnection(sessionName, connectionId);
-        return;
+        this.logger.debug('Harden: updateConnection succeeded normally');
+      } catch (error) {
+        if (isXboxSessionInitializationError(error) && xuid && subscriptionId) {
+          this.logger.debug('Harden: updateConnection failed with initialization error, retrying with fixed payload', { xuid });
+          await rest.updateSession(sessionName, buildInitializedMemberUpdate(xuid, connectionId, subscriptionId));
+        } else {
+          throw error;
+        }
       }
-
-      this.logger.debug('Harden: updateConnection using initialized member update', { sessionName, xuid });
-      await rest.updateSession(sessionName, buildInitializedMemberUpdate(xuid, connectionId, subscriptionId));
     };
 
     rest.updateSession = async (sessionName: string, payload: any): Promise<unknown> => {
@@ -676,7 +745,12 @@ export class FriendConnectService implements AdminServiceController {
             initialize: true,
           },
         };
-        this.logger.debug('Harden: updateSession injected initialize constant', { sessionName });
+        // Add protocol constant which helps with NetherNet connectivity on some versions
+        if (!payload.members.me.constants.custom) {
+          payload.members.me.constants.custom = {};
+        }
+        payload.members.me.constants.custom.protocol = 4;
+        this.logger.debug('Harden: updateSession injected constants', { sessionName });
       }
       return originalUpdateSession(sessionName, payload);
     };
@@ -789,6 +863,9 @@ function buildInitializedMemberUpdate(xuid: string, connectionId: string, subscr
           system: {
             xuid,
             initialize: true,
+          },
+          custom: {
+            protocol: 4,
           },
         },
         properties: {
