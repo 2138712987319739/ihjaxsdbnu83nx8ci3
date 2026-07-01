@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getPublicEnv, hasSupabaseEnv } from '@/lib/env';
 

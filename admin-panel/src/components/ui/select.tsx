@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
@@ -6,7 +5,7 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
   return (
     <select
       className={cn(
-        'h-9 w-full rounded-md border border-input bg-[#0b1020] px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30',
+        'liquid-control h-9 w-full rounded-md px-3 text-sm text-foreground outline-none transition focus:border-blue-300/60 focus:ring-2 focus:ring-blue-400/30',
         className,
       )}
       {...props}

@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
@@ -7,7 +6,7 @@ export function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTab
 }
 
 export function TableHeader({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn('[&_tr]:border-b [&_tr]:border-border', className)} {...props} />;
+  return <thead className={cn('bg-blue-500/8 [&_tr]:border-b [&_tr]:border-blue-300/20', className)} {...props} />;
 }
 
 export function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
@@ -15,11 +14,11 @@ export function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTabl
 }
 
 export function TableRow({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn('border-b border-border transition hover:bg-white/5', className)} {...props} />;
+  return <tr className={cn('border-b border-blue-300/14 transition odd:bg-blue-500/[0.025] hover:bg-blue-500/10', className)} {...props} />;
 }
 
 export function TableHead({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn('h-9 px-3 text-left text-xs font-medium uppercase text-muted-foreground', className)} {...props} />;
+  return <th className={cn('h-9 px-3 text-left text-xs font-semibold uppercase text-blue-100/82', className)} {...props} />;
 }
 
 export function TableCell({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {

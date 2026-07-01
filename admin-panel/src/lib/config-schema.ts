@@ -1,8 +1,7 @@
-// Website or admin panel made by Clovic.
 import { z } from 'zod';
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
-const safeText = (max: number) => z.string().trim().min(1).max(max).refine((value) => !hasControlCharacter(value));
+const safeText = (max: number) => z.string().trim().min(1).max(max).refine((value) => !hasControlCharacter(value) && !hasMinecraftFormatting(value));
 const hostLabel = '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?';
 const domain = new RegExp(`^(?:${hostLabel}\\.)+${hostLabel}$`);
 const ipv4 = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
@@ -38,6 +37,7 @@ export const configSchema = z.object({
   friendCheckIntervalMs: z.number().int().min(5000).max(3600000),
   friendAddIntervalMs: z.number().int().min(1000).max(600000),
   friendRemoveIntervalMs: z.number().int().min(1000).max(600000),
+  keepaliveIntervalMs: z.number().int().min(120000).max(300000),
 });
 
 export function parseListText(value: string): string[] {
@@ -57,4 +57,8 @@ function hasControlCharacter(value: string): boolean {
   }
 
   return false;
+}
+
+function hasMinecraftFormatting(value: string): boolean {
+  return /\u00a7[0-9A-FK-OR]/i.test(value);
 }

@@ -1,8 +1,7 @@
-// Website or admin panel made by Clovic.
 import type { BotConfig, DashboardData } from '@/types/admin';
 
 export const defaultConfig = {
-  displayName: 'Fracture MC',
+  displayName: 'FractureMC',
   targetHost: 'play.fracturemc.com',
   targetPort: 19132,
   primaryColor: '#2777ff',
@@ -10,13 +9,13 @@ export const defaultConfig = {
   panelFont: 'Geist',
   brandingAssetUrl: '',
   joinability: 'friendsOnly',
-  useBrandColors: true,
+  useBrandColors: false,
   worldVersion: 'Crossplay Portal',
   updatePresence: true,
   inviteCooldownMs: 90000,
   worldMaxPlayers: 100,
-  sessionCardText: 'Fracture MC | play.fracturemc.com',
-  autoFriendAcceptEnabled: false,
+  sessionCardText: 'FractureMC',
+  autoFriendAcceptEnabled: true,
   autoFriendAddEnabled: true,
   autoInviteOnFriendAdded: true,
   friendPolicy: 'open',
@@ -28,12 +27,14 @@ export const defaultConfig = {
   friendCheckIntervalMs: 5000,
   friendAddIntervalMs: 5000,
   friendRemoveIntervalMs: 2500,
+  keepaliveIntervalMs: 300000,
 } satisfies BotConfig;
 
 export const sampleDashboardData: DashboardData = {
   config: defaultConfig,
   status: {
     online: false,
+    heartbeatFresh: false,
     currentPlayers: 0,
     totalJoins: 0,
     targetHost: defaultConfig.targetHost,
@@ -44,6 +45,7 @@ export const sampleDashboardData: DashboardData = {
     lockdownMode: defaultConfig.lockdownMode,
     lastHeartbeat: null,
   },
+  adminUsers: [],
   events: [
     {
       id: 'sample-event',

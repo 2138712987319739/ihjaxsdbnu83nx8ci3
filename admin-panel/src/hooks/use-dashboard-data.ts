@@ -1,4 +1,3 @@
-// Website or admin panel made by Clovic.
 'use client';
 
 import { useEffect } from 'react';
@@ -6,9 +5,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DashboardData } from '@/types/admin';
 import { getPublicEnv } from '@/lib/env';
 import { getSupabaseClient } from '@/lib/supabase';
+import { queueBotAction } from '@/lib/actions';
 import { defaultConfig, sampleDashboardData } from '@/lib/sample-data';
 
 type SupabaseRecord = Record<string, unknown>;
+
+const HEARTBEAT_FRESH_MS = 90000;
+const PANEL_KEEPALIVE_MS = 5 * 60 * 1000;
 
 export function useDashboardData(enabled: boolean) {
   const queryClient = useQueryClient();
@@ -44,6 +47,22 @@ export function useDashboardData(enabled: boolean) {
     };
   }, [botId, enabled, queryClient, supabase]);
 
+  useEffect(() => {
+    if (!enabled || !supabase) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      void queueBotAction('keepalive_ping', { source: 'admin_panel', scheduled: true }).catch(() => undefined);
+    }, PANEL_KEEPALIVE_MS);
+
+    return () => clearInterval(timer);
+  }, [enabled, supabase]);
+
   return useQuery({
     queryKey: ['dashboard', botId],
     queryFn: () => fetchDashboardData(botId),
@@ -59,9 +78,10 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
     return sampleDashboardData;
   }
 
-  const [status, config, events, errors, actions, fixLogs, players, securityEvents] = await Promise.all([
+  const [status, config, adminUsers, events, errors, actions, fixLogs, players, securityEvents] = await Promise.all([
     supabase.from('bot_status').select('*').eq('bot_id', botId).maybeSingle(),
     supabase.from('bot_config').select('*').eq('bot_id', botId).maybeSingle(),
+    supabase.from('admin_users').select('*').order('created_at', { ascending: true }).limit(50),
     supabase.from('bot_events').select('*').eq('bot_id', botId).order('created_at', { ascending: false }).limit(40),
     supabase.from('bot_errors').select('*').eq('bot_id', botId).order('created_at', { ascending: false }).limit(30),
     supabase.from('bot_actions').select('*').eq('bot_id', botId).order('created_at', { ascending: false }).limit(30),
@@ -72,11 +92,15 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
 
   const statusRow = status.data as SupabaseRecord | null;
   const configRow = config.data as SupabaseRecord | null;
+  const lastHeartbeat = stringValue(statusRow?.last_heartbeat, '');
+  const heartbeatFresh = isFreshHeartbeat(lastHeartbeat);
+  const online = Boolean(statusRow?.online) && heartbeatFresh;
 
   return {
     config: mapConfig(configRow),
     status: {
-      online: Boolean(statusRow?.online),
+      online,
+      heartbeatFresh,
       currentPlayers: numberValue(statusRow?.current_players),
       totalJoins: numberValue(statusRow?.total_joins),
       targetHost: stringValue(statusRow?.target_host, defaultConfig.targetHost),
@@ -85,8 +109,19 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       joinability: stringValue(statusRow?.joinability, defaultConfig.joinability) as DashboardData['status']['joinability'],
       friendPolicy: stringValue(statusRow?.friend_policy, defaultConfig.friendPolicy) as DashboardData['status']['friendPolicy'],
       lockdownMode: booleanValue(statusRow?.lockdown_mode, defaultConfig.lockdownMode),
-      lastHeartbeat: stringValue(statusRow?.last_heartbeat, ''),
+      lastHeartbeat,
     },
+    adminUsers: ((adminUsers.data ?? []) as SupabaseRecord[]).map((row) => ({
+      id: stringValue(row.user_id, crypto.randomUUID()),
+      email: stringValue(row.email, 'unknown'),
+      role: roleValue(row.role),
+      permissions: permissionListValue(row.permissions),
+      invitedAt: nullableString(row.invited_at),
+      acceptedAt: nullableString(row.accepted_at),
+      passwordSetAt: Object.hasOwn(row, 'password_set_at') ? nullableString(row.password_set_at) : stringValue(row.created_at, new Date().toISOString()),
+      lastSeenAt: nullableString(row.last_seen_at),
+      disabledAt: nullableString(row.disabled_at),
+    })),
     events: ((events.data ?? []) as SupabaseRecord[]).map((row) => ({
       id: stringValue(row.id, crypto.randomUUID()),
       type: stringValue(row.event_type, 'event'),
@@ -108,6 +143,7 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       actionType: stringValue(row.action_type, 'unknown'),
       status: stringValue(row.status, 'queued') as DashboardData['actions'][number]['status'],
       message: resultMessage(row.result),
+      manualInviteLink: resultManualInviteLink(row.result),
       createdAt: stringValue(row.created_at, new Date().toISOString()),
     })),
     fixLogs: ((fixLogs.data ?? []) as SupabaseRecord[]).map((row) => ({
@@ -133,6 +169,27 @@ async function fetchDashboardData(botId: string): Promise<DashboardData> {
       createdAt: stringValue(row.created_at, new Date().toISOString()),
     })),
   };
+}
+
+function roleValue(value: unknown): DashboardData['adminUsers'][number]['role'] {
+  if (value === 'owner' || value === 'admin' || value === 'operator' || value === 'viewer') {
+    return value;
+  }
+
+  return 'viewer';
+}
+
+function permissionListValue(value: unknown): DashboardData['adminUsers'][number]['permissions'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is DashboardData['adminUsers'][number]['permissions'][number] => (
+    entry === 'config:write'
+    || entry === 'actions:write'
+    || entry === 'users:write'
+    || entry === 'security:write'
+  ));
 }
 
 function mapConfig(row: SupabaseRecord | null): DashboardData['config'] {
@@ -169,11 +226,17 @@ function mapConfig(row: SupabaseRecord | null): DashboardData['config'] {
     friendCheckIntervalMs: numberValue(config.friendCheckIntervalMs, defaultConfig.friendCheckIntervalMs),
     friendAddIntervalMs: numberValue(config.friendAddIntervalMs, defaultConfig.friendAddIntervalMs),
     friendRemoveIntervalMs: numberValue(config.friendRemoveIntervalMs, defaultConfig.friendRemoveIntervalMs),
+    keepaliveIntervalMs: numberValue(config.keepaliveIntervalMs, defaultConfig.keepaliveIntervalMs),
   };
 }
 
 function stringValue(value: unknown, fallback: string): string {
   return typeof value === 'string' && value ? value : fallback;
+}
+
+function isFreshHeartbeat(value: string): boolean {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= HEARTBEAT_FRESH_MS;
 }
 
 function panelFontValue(value: unknown): DashboardData['config']['panelFont'] {
@@ -211,4 +274,18 @@ function resultMessage(value: unknown): string | null {
 
   const message = (value as SupabaseRecord).message;
   return typeof message === 'string' ? message : null;
+}
+
+function resultManualInviteLink(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const data = (value as SupabaseRecord).data;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return null;
+  }
+
+  const link = (data as SupabaseRecord).manualInviteLink ?? (data as SupabaseRecord).actionLink;
+  return typeof link === 'string' && /^https:\/\/[^\s"')]+$/i.test(link) ? link : null;
 }
