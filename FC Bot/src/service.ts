@@ -41,10 +41,6 @@ type SessionMemberUpdate = {
           xuid: string;
           initialize: true;
         };
-        custom?: {
-          protocol?: number;
-          netherNetEnabled?: boolean;
-        };
       };
       properties: {
         system: {
@@ -742,39 +738,36 @@ export class FriendConnectService implements AdminServiceController {
     rest.updateSession = async (sessionName: string, payload: any): Promise<unknown> => {
       const xuid = host.profile?.xuid;
 
-      // Harden session constants if they are present in the payload
-      if (payload.constants) {
-        payload.constants.system = {
-          ...(payload.constants.system ?? {}),
-          capabilities: {
-            ...(payload.constants.system?.capabilities ?? {}),
-            connectivity: true,
-            multiplayer: true,
-            peerToPeerEnabled: true,
-            crossPlayEnabled: true,
-          },
+      // Strip any capabilities fields from properties.system — Xbox rejects them there.
+      // The MinecraftLobby template defines capabilities server-side; we must not send them.
+      if (payload?.properties?.system) {
+        const { peerToPeerEnabled, crossPlayEnabled, connectivity, multiplayer, ...safeSystemProps } = payload.properties.system;
+        payload.properties.system = safeSystemProps;
+      }
+
+      // Inject netherNetEnabled into properties.custom so Xbox brokers a NetherNet tunnel.
+      if (payload?.properties?.custom !== undefined || payload?.properties) {
+        if (!payload.properties) payload.properties = {};
+        payload.properties.custom = {
+          ...(payload.properties.custom ?? {}),
+          netherNetEnabled: true,
         };
       }
 
       if (xuid && payload?.members?.me) {
-        // Ensure initialize constant is always present in any 'me' member update
+        // Ensure initialize constant is always present in any 'me' member update.
+        // Only xuid and initialize are accepted in members.me.constants.system.
         payload.members.me.constants = {
           ...payload.members.me.constants,
           system: {
-            ...(payload.members.me.constants?.system ?? {}),
             xuid,
-            initialize: true,
+            initialize: true as const,
           },
         };
-        // Add protocol and NetherNet constants which help with connectivity
-        if (!payload.members.me.constants.custom) {
-          payload.members.me.constants.custom = {};
-        }
-        payload.members.me.constants.custom.protocol = 4;
-        payload.members.me.constants.custom.netherNetEnabled = true;
 
-        this.logger.debug('Harden: updateSession injected constants and capabilities', { sessionName });
+        this.logger.debug('Harden: updateSession injected initialize and netherNetEnabled', { sessionName });
       }
+
       return originalUpdateSession(sessionName, payload);
     };
 
@@ -886,10 +879,6 @@ function buildInitializedMemberUpdate(xuid: string, connectionId: string, subscr
           system: {
             xuid,
             initialize: true,
-          },
-          custom: {
-            protocol: 4,
-            netherNetEnabled: true,
           },
         },
         properties: {

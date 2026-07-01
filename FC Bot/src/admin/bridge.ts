@@ -426,7 +426,7 @@ function actionLabel(actionType: string): string {
     clear_stale_actions: 'Clear stuck commands',
     disable_lockdown: 'Disable lockdown',
     enable_lockdown: 'Enable lockdown',
-    keepalive: 'Ping bot session',
+    keepalive_ping: 'Ping bot session',
     reconnect_portal: 'Reconnect portal',
     reload_config: 'Reload runtime settings',
     republish_session: 'Republish session',
@@ -448,7 +448,7 @@ function actionOutcome(actionType: string): string {
     clear_stale_actions: 'Old queued or running commands were closed so new commands can move forward.',
     disable_lockdown: 'Lockdown mode was turned off and normal friend policy is active again.',
     enable_lockdown: 'Lockdown mode was turned on so only allowlisted players can pass policy checks.',
-    keepalive: 'The bot refreshed the Xbox session heartbeat and visible player count.',
+    keepalive_ping: 'The bot refreshed the Xbox session heartbeat and visible player count.',
     reconnect_portal: 'The bot closed the old portal session and opened a fresh Xbox session.',
     reload_config: 'The bridge refreshed the current runtime config snapshot.',
     republish_session: 'The Minecraft session card and visible player count were refreshed.',
@@ -471,7 +471,7 @@ function actionSteps(actionType: string, ok: boolean): string[] {
   }
 
   const steps: Record<string, string[]> = {
-    keepalive: [
+    keepalive_ping: [
       'The bridge sent a lightweight ping command to the bot.',
       'The bot refreshed the Xbox session member count.',
       'The bot refreshed the public session activity handle.',
