@@ -56,9 +56,16 @@ type SessionMemberUpdate = {
   };
 };
 
+type SessionUpdatePayload = Partial<SessionMemberUpdate> & {
+  properties?: {
+    system?: Record<string, unknown>;
+    custom?: Record<string, unknown>;
+  };
+};
+
 type PortalRestRuntime = {
   updateConnection(sessionName: string, connectionId: string): Promise<void>;
-  updateSession(sessionName: string, payload: SessionMemberUpdate): Promise<unknown>;
+  updateSession(sessionName: string, payload: SessionUpdatePayload): Promise<unknown>;
   leaveSession(sessionName: string): Promise<void>;
   setActivity(sessionName: string): Promise<unknown>;
 };
@@ -523,17 +530,18 @@ export class FriendConnectService implements AdminServiceController {
 
     try {
       const { lookup } = await import('node:dns/promises');
-      const address = await lookup(config.bedrockHost);
-      steps.push(`DNS: ${config.bedrockHost} resolves to ${address.address}`);
+      const addresses = await lookup(config.bedrockHost, { all: true, verbatim: false });
+      const addressList = addresses.map((address) => address.address).join(', ');
+      steps.push(`DNS: ${config.bedrockHost} resolves to ${addressList}`);
 
       // Try a UDP Ping to see if the server is actually reachable
-      const reachable = await this.pingUDP(address.address, config.bedrockPort);
+      const reachable = await this.pingUDP(addresses, config.bedrockPort);
       if (reachable) {
         steps.push(`Network: Successfully reached the server on port ${config.bedrockPort} (UDP).`);
       } else {
         steps.push(`Network FAILED: Could not reach the server on port ${config.bedrockPort}. Check your Firewall or Geyser config.`);
       }
-    } catch (error) {
+    } catch {
       steps.push(`DNS FAILED: Could not resolve ${config.bedrockHost}`);
     }
 
@@ -569,43 +577,51 @@ export class FriendConnectService implements AdminServiceController {
     };
   }
 
-  private async pingUDP(host: string, port: number): Promise<boolean> {
+  private async pingUDP(addresses: Array<{ address: string; family: number }>, port: number): Promise<boolean> {
     const dgram = await import('node:dgram');
-    return new Promise((resolve) => {
-      const socket = dgram.createSocket('udp4');
-      const timeout = setTimeout(() => {
-        socket.close();
-        resolve(false);
-      }, 3000);
+    const targets = addresses.length ? addresses : [{ address: this.config.bedrockHost, family: 4 }];
 
-      // RakNet Unconnected Ping
-      const ping = Buffer.alloc(33);
-      ping[0] = 0x01; // ID_UNCONNECTED_PING
-      // 8 bytes time (can be 0)
-      // 16 bytes magic
-      Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex').copy(ping, 9);
-      // 8 bytes GUID (can be 0)
+    for (const target of targets) {
+      const reachable = await new Promise<boolean>((resolve) => {
+        const socket = dgram.createSocket(target.family === 6 ? 'udp6' : 'udp4');
+        const timeout = setTimeout(() => {
+          socket.close();
+          resolve(false);
+        }, 3000);
 
-      socket.on('message', () => {
-        clearTimeout(timeout);
-        socket.close();
-        resolve(true);
-      });
+        const ping = Buffer.alloc(33);
+        ping[0] = 0x01; // RakNet ID_UNCONNECTED_PING
+        ping.writeBigInt64BE(BigInt(Date.now()), 1);
+        Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex').copy(ping, 9);
+        ping.writeBigInt64BE(1n, 25);
 
-      socket.on('error', () => {
-        clearTimeout(timeout);
-        socket.close();
-        resolve(false);
-      });
+        socket.on('message', () => {
+          clearTimeout(timeout);
+          socket.close();
+          resolve(true);
+        });
 
-      socket.send(ping, port, host, (err) => {
-        if (err) {
+        socket.on('error', () => {
           clearTimeout(timeout);
           socket.close();
           resolve(false);
-        }
+        });
+
+        socket.send(ping, port, target.address, (err) => {
+          if (err) {
+            clearTimeout(timeout);
+            socket.close();
+            resolve(false);
+          }
+        });
       });
-    });
+
+      if (reachable) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async runKeepaliveAction(): Promise<AdminActionResult> {
@@ -735,24 +751,23 @@ export class FriendConnectService implements AdminServiceController {
       }
     };
 
-    rest.updateSession = async (sessionName: string, payload: any): Promise<unknown> => {
+    rest.updateSession = async (sessionName: string, payload: SessionUpdatePayload): Promise<unknown> => {
       const xuid = host.profile?.xuid;
 
       // Strip any capabilities fields from properties.system — Xbox rejects them there.
       // The MinecraftLobby template defines capabilities server-side; we must not send them.
       if (payload?.properties?.system) {
-        const { peerToPeerEnabled, crossPlayEnabled, connectivity, multiplayer, ...safeSystemProps } = payload.properties.system;
-        payload.properties.system = safeSystemProps;
+        delete payload.properties.system.peerToPeerEnabled;
+        delete payload.properties.system.crossPlayEnabled;
+        delete payload.properties.system.connectivity;
+        delete payload.properties.system.multiplayer;
       }
 
-      // Inject netherNetEnabled into properties.custom so Xbox brokers a NetherNet tunnel.
-      if (payload?.properties?.custom !== undefined || payload?.properties) {
-        if (!payload.properties) payload.properties = {};
-        payload.properties.custom = {
-          ...(payload.properties.custom ?? {}),
-          netherNetEnabled: true,
-        };
-      }
+      payload.properties = payload.properties ?? {};
+      payload.properties.custom = {
+        ...(payload.properties.custom ?? {}),
+        netherNetEnabled: true,
+      };
 
       if (xuid && payload?.members?.me) {
         // Ensure initialize constant is always present in any 'me' member update.
