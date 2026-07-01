@@ -37,7 +37,7 @@ try {
   console.error('Self-healing failed:', error.message);
 }
 
-import { FriendConnectService, isXboxSessionInitializationError } from './service';
+import { FriendConnectService, isXboxSessionInitializationError, isXboxRateLimitError } from './service';
 import { AdminBridge } from './admin/bridge';
 import { loadConfig, loadEnvFile } from './config';
 import { getErrorMessage, Logger } from './logger';
@@ -59,9 +59,32 @@ let unhandledRejectionCount = 0;
 const MAX_UNHANDLED_REJECTIONS = 10;
 
 async function main(): Promise<void> {
-  await service.start();
-  adminBridge?.start();
-  logger.info('Friend connect service is ready');
+  try {
+    await service.start();
+    adminBridge?.start();
+    logger.info('Friend connect service is ready');
+  } catch (error: any) {
+    if (isXboxRateLimitError(error)) {
+      const message = getErrorMessage(error);
+      let waitSeconds = 60; // Default wait
+
+      try {
+        const jsonMatch = message.match(/\{.*\}/);
+        if (jsonMatch) {
+          const details = JSON.parse(jsonMatch[0]);
+          if (details.periodInSeconds) {
+            waitSeconds = details.periodInSeconds + 10; // Add 10s buffer
+          }
+        }
+      } catch (e) {
+        // Ignore parse error
+      }
+
+      logger.warn(`Xbox Rate Limit detected (429). Waiting ${waitSeconds} seconds before exiting to prevent crash loop...`);
+      await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+    }
+    throw error;
+  }
 }
 
 /**

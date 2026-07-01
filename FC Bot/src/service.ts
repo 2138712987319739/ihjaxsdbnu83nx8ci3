@@ -78,6 +78,11 @@ export function isXboxSessionInitializationError(error: unknown): boolean {
   return message.includes(SESSION_INITIALIZATION_ERROR_TEXT) || message.includes(SESSION_STALE_ERROR_TEXT);
 }
 
+export function isXboxRateLimitError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('429 too many requests');
+}
+
 export class FriendConnectService implements AdminServiceController {
   private portal: BedrockPortal | null = null;
   private inviteCache: InviteCache;
