@@ -66,32 +66,44 @@ let unhandledRejectionCount = 0;
 const MAX_UNHANDLED_REJECTIONS = 10;
 
 async function main(): Promise<void> {
-  try {
-    await service.start();
-    adminBridge?.start();
-    logger.info('Friend connect service is ready');
-  } catch (error: unknown) {
-    if (isXboxRateLimitError(error)) {
-      const message = getErrorMessage(error);
-      let waitSeconds = 60; // Default wait
-
-      try {
-        const jsonMatch = message.match(/\{.*\}/);
-        if (jsonMatch) {
-          const details = JSON.parse(jsonMatch[0]);
-          if (details.periodInSeconds) {
-            waitSeconds = details.periodInSeconds + 10; // Add 10s buffer
-          }
-        }
-      } catch {
-        // Ignore parse error
+  while (!stopping) {
+    try {
+      await service.start();
+      adminBridge?.start();
+      logger.info('Friend connect service is ready');
+      return;
+    } catch (error: unknown) {
+      if (!isXboxRateLimitError(error)) {
+        throw error;
       }
 
-      logger.warn(`Xbox Rate Limit detected (429). Waiting ${waitSeconds} seconds before exiting to prevent crash loop...`);
-      await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+      const waitSeconds = readXboxRateLimitWaitSeconds(getErrorMessage(error));
+      logger.warn('Xbox rate limit detected. Waiting before retrying startup.', { waitSeconds });
+      await delay(waitSeconds * 1000);
     }
-    throw error;
   }
+}
+
+function readXboxRateLimitWaitSeconds(message: string): number {
+  const fallbackSeconds = 60;
+
+  try {
+    const jsonMatch = message.match(/\{.*\}/);
+    if (!jsonMatch) {
+      return fallbackSeconds;
+    }
+
+    const details = JSON.parse(jsonMatch[0]) as { periodInSeconds?: unknown };
+    return typeof details.periodInSeconds === 'number' && Number.isFinite(details.periodInSeconds)
+      ? Math.max(fallbackSeconds, details.periodInSeconds + 10)
+      : fallbackSeconds;
+  } catch {
+    return fallbackSeconds;
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
