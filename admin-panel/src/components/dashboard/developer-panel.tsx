@@ -21,7 +21,7 @@ import { getDefenseSignal, securityMachine } from '@/store/security-machine';
 type DeveloperPanelProps = {
   data: DashboardData;
   configured: boolean;
-  profile?: any;
+  profile?: unknown;
 };
 
 type ConsoleLine = {
@@ -146,7 +146,7 @@ const securityActions = [
   'disable_lockdown',
 ] as const satisfies readonly BotActionType[];
 
-export function DeveloperPanel({ data, configured, profile }: DeveloperPanelProps) {
+export function DeveloperPanel({ data, configured }: DeveloperPanelProps) {
   const [activeTab, setActiveTab] = useState('console');
   const [blockXuid, setBlockXuid] = useState('');
   const [message, setMessage] = useState('');

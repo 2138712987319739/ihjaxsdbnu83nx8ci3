@@ -86,6 +86,14 @@ export function isXboxRateLimitError(error: unknown): boolean {
   return message.includes('429 too many requests');
 }
 
+function isRecoverableSessionActivityError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return isXboxSessionInitializationError(error)
+    || message.includes('404 not found')
+    || message.includes('status 404')
+    || message.includes('session not found');
+}
+
 export class FriendConnectService implements AdminServiceController {
   private portal: BedrockPortal | null = null;
   private inviteCache: InviteCache;
@@ -673,7 +681,10 @@ export class FriendConnectService implements AdminServiceController {
     }
 
     this.keepaliveTimer = setInterval(() => void this.runScheduledKeepalive(), this.config.sessionKeepaliveIntervalMs);
+    this.keepaliveTimer.unref?.();
     this.logger.info('Session keepalive started', { intervalMs: this.config.sessionKeepaliveIntervalMs });
+
+    setTimeout(() => void this.runScheduledKeepalive(), 30000).unref?.();
   }
 
   private stopSessionKeepalive(): void {
@@ -722,6 +733,10 @@ export class FriendConnectService implements AdminServiceController {
 
     const host = portal.host as unknown as PortalHostRuntime;
     await host.rest.setActivity(sessionName).catch((error: unknown) => {
+      if (isRecoverableSessionActivityError(error)) {
+        throw error;
+      }
+
       this.logger.warn('Session activity refresh failed', { source, error: getErrorMessage(error) });
     });
   }

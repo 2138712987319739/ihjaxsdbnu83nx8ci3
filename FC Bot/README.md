@@ -39,7 +39,7 @@ On first start, complete the Microsoft device login shown in the terminal. The a
 
 The session card publishes the world name as `FractureMC`. Minecraft formatting codes are rejected so Bedrock clients do not display raw formatting characters.
 
-The service checks the Xbox session every five minutes by default. Set `FRACTURE_KEEPALIVE_INTERVAL_MS` between `120000` and `300000` to tune that interval. The admin panel can also queue a manual session check from Developer controls.
+The service checks the Xbox session every two minutes by default. Set `FRACTURE_SESSION_KEEPALIVE_INTERVAL_MS` between `120000` and `300000` to tune that interval. Existing installs that still use `FRACTURE_KEEPALIVE_INTERVAL_MS` are also accepted. The admin panel can queue a manual session check from Developer controls.
 
 ## Operations
 

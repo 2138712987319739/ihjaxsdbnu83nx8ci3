@@ -146,6 +146,6 @@ export function configToPatch(config: BotConfig) {
     friendCheckIntervalMs: config.friendCheckIntervalMs,
     friendAddIntervalMs: config.friendAddIntervalMs,
     friendRemoveIntervalMs: config.friendRemoveIntervalMs,
-    keepaliveIntervalMs: config.keepaliveIntervalMs,
+    sessionKeepaliveIntervalMs: config.keepaliveIntervalMs,
   };
 }

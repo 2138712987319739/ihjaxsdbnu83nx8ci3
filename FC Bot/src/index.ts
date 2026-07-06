@@ -1,6 +1,9 @@
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
+
+const runtimeRequire = createRequire(__filename);
 
 /**
  * Self-healing: Ensure native modules match the current OS.
@@ -13,14 +16,14 @@ try {
 
   if (!needsInstall && existsSync(datachannelPath)) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      require('node-datachannel');
-    } catch (error: any) {
+      runtimeRequire('node-datachannel');
+    } catch (error: unknown) {
+      const message = readStartupErrorMessage(error);
       if (
-        error.message?.includes('invalid ELF header') ||
-        error.message?.includes('invalid arch') ||
-        error.message?.includes('module was compiled against a different Node.js version') ||
-        error.message?.includes('Cannot find module')
+        message.includes('invalid ELF header') ||
+        message.includes('invalid arch') ||
+        message.includes('module was compiled against a different Node.js version') ||
+        message.includes('Cannot find module')
       ) {
         console.log('Detected incompatible native modules. Reinstalling for current system...');
         needsInstall = true;
@@ -33,8 +36,12 @@ try {
     execSync('npm install --omit=dev', { stdio: 'inherit' });
     console.log('Dependencies updated successfully.');
   }
-} catch (error: any) {
-  console.error('Self-healing failed:', error.message);
+} catch (error: unknown) {
+  console.error('Self-healing failed:', readStartupErrorMessage(error));
+}
+
+function readStartupErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 import { FriendConnectService, isXboxSessionInitializationError, isXboxRateLimitError } from './service';
@@ -63,7 +70,7 @@ async function main(): Promise<void> {
     await service.start();
     adminBridge?.start();
     logger.info('Friend connect service is ready');
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (isXboxRateLimitError(error)) {
       const message = getErrorMessage(error);
       let waitSeconds = 60; // Default wait
@@ -76,7 +83,7 @@ async function main(): Promise<void> {
             waitSeconds = details.periodInSeconds + 10; // Add 10s buffer
           }
         }
-      } catch (e) {
+      } catch {
         // Ignore parse error
       }
 

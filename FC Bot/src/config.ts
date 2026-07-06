@@ -149,7 +149,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     friendAddIntervalMs: readInteger(env, 'FRACTURE_FRIEND_ADD_INTERVAL_MS', defaults.friendAddIntervalMs, 1000, 600000),
     friendRemoveIntervalMs: readInteger(env, 'FRACTURE_FRIEND_REMOVE_INTERVAL_MS', defaults.friendRemoveIntervalMs, 1000, 600000),
     inviteCooldownMs: readInteger(env, 'FRACTURE_INVITE_COOLDOWN_MS', defaults.inviteCooldownMs, 10000, 3600000),
-    sessionKeepaliveIntervalMs: readInteger(env, 'FRACTURE_SESSION_KEEPALIVE_INTERVAL_MS', defaults.sessionKeepaliveIntervalMs, 120000, 300000),
+    sessionKeepaliveIntervalMs: readKeepaliveInterval(env),
     logLevel: readLogLevel(env, 'LOG_LEVEL', defaults.logLevel),
     admin,
   };
@@ -258,7 +258,20 @@ export function normalizeRemoteConfigPatch(input: unknown): RemoteConfigPatch {
     patch.sessionKeepaliveIntervalMs = readIntegerValue(input.sessionKeepaliveIntervalMs, 'sessionKeepaliveIntervalMs', 120000, 300000);
   }
 
+  if ('keepaliveIntervalMs' in input) {
+    patch.sessionKeepaliveIntervalMs = readIntegerValue(input.keepaliveIntervalMs, 'keepaliveIntervalMs', 120000, 300000);
+  }
+
   return patch;
+}
+
+function readKeepaliveInterval(env: NodeJS.ProcessEnv): number {
+  const key = env.FRACTURE_SESSION_KEEPALIVE_INTERVAL_MS ? 'FRACTURE_SESSION_KEEPALIVE_INTERVAL_MS' : 'FRACTURE_KEEPALIVE_INTERVAL_MS';
+  const fallback = key === 'FRACTURE_SESSION_KEEPALIVE_INTERVAL_MS'
+    ? defaults.sessionKeepaliveIntervalMs
+    : defaults.sessionKeepaliveIntervalMs;
+
+  return readInteger(env, key, fallback, 120000, 300000);
 }
 
 function readEnv(env: NodeJS.ProcessEnv, key: string, fallback: string): string {
