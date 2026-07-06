@@ -15,9 +15,6 @@ import { normalizeRemoteConfigPatch } from './config';
 import { RetryQueue } from './retry-queue';
 import { UNSUPPORTED_ACTION_MESSAGE } from './constants';
 
-/**
- * Data structure for queued invite retry
- */
 type InviteRetryData = {
   xuid: string;
   gamertag: string;
@@ -30,6 +27,8 @@ const joinabilityMap: Record<RuntimeConfig['joinability'], Joinability> = {
 };
 
 const SESSION_KEEPALIVE_MIN_MEMBER_COUNT = 1;
+const KEEPALIVE_FAILURES_BEFORE_RECOVERY = 2;
+const RATE_LIMIT_DELAY_BUFFER_MS = 10000;
 const SESSION_INITIALIZATION_ERROR_TEXT = 'member initialization requiring at least 1 members to start';
 const SESSION_STALE_ERROR_TEXT = 'session is configured for member initialization';
 
@@ -86,6 +85,37 @@ export function isXboxRateLimitError(error: unknown): boolean {
   return message.includes('429 too many requests');
 }
 
+export function readXboxRateLimitDelayMs(error: unknown): number {
+  const fallbackMs = 70000;
+  const message = getErrorMessage(error);
+
+  try {
+    const jsonMatch = message.match(/\{.*\}/);
+    if (!jsonMatch) {
+      return fallbackMs;
+    }
+
+    const details = JSON.parse(jsonMatch[0]) as { periodInSeconds?: unknown };
+    if (typeof details.periodInSeconds !== 'number' || !Number.isFinite(details.periodInSeconds)) {
+      return fallbackMs;
+    }
+
+    return Math.max(fallbackMs, details.periodInSeconds * 1000 + RATE_LIMIT_DELAY_BUFFER_MS);
+  } catch {
+    return fallbackMs;
+  }
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('fetch failed')
+    || message.includes('network')
+    || message.includes('econnreset')
+    || message.includes('etimedout')
+    || message.includes('eai_again')
+    || message.includes('socket hang up');
+}
+
 function isRecoverableSessionActivityError(error: unknown): boolean {
   const message = getErrorMessage(error).toLowerCase();
   return isXboxSessionInitializationError(error)
@@ -104,6 +134,9 @@ export class FriendConnectService implements AdminServiceController {
   private keepaliveTimer: NodeJS.Timeout | null = null;
   private keepaliveInFlight = false;
   private restartPromise: Promise<void> | null = null;
+  private keepaliveFailureCount = 0;
+  private keepalivePausedUntil = 0;
+  private rateLimitRecoveryTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private config: RuntimeConfig,
@@ -165,6 +198,7 @@ export class FriendConnectService implements AdminServiceController {
 
   async stop(): Promise<void> {
     this.stopSessionKeepalive();
+    this.clearRateLimitRecoveryTimer();
 
     const portal = this.portal;
     this.portal = null;
@@ -483,6 +517,7 @@ export class FriendConnectService implements AdminServiceController {
   }
 
   async recoverPortal(source: string, error?: unknown): Promise<void> {
+    this.keepaliveFailureCount = 0;
     this.logger.warn('Recovering portal after Xbox session refresh failure', {
       source,
       error: error ? getErrorMessage(error) : undefined,
@@ -502,6 +537,45 @@ export class FriendConnectService implements AdminServiceController {
     });
   }
 
+  scheduleRateLimitRecovery(source: string, error: unknown, delayMs = readXboxRateLimitDelayMs(error)): void {
+    this.pauseKeepaliveUntil(Date.now() + delayMs, source, error);
+
+    if (this.rateLimitRecoveryTimer) {
+      this.logger.warn('Xbox rate limit recovery is already scheduled', {
+        source,
+        retryInMs: Math.max(0, this.keepalivePausedUntil - Date.now()),
+      });
+      return;
+    }
+
+    this.logger.warn('Xbox rate limit detected. Portal recovery delayed until the rate limit resets.', {
+      source,
+      retryInMs: delayMs,
+      error: getErrorMessage(error),
+    });
+
+    this.recordEvent({
+      type: 'session_recovered',
+      message: 'Xbox is rate limiting session refreshes. Recovery is scheduled.',
+      payload: { source, retryInMs: delayMs },
+    });
+
+    this.rateLimitRecoveryTimer = setTimeout(() => {
+      this.rateLimitRecoveryTimer = null;
+      void this.recoverPortal(source, error).catch((recoveryError: unknown) => {
+        if (isXboxRateLimitError(recoveryError)) {
+          this.scheduleRateLimitRecovery(source, recoveryError);
+          return;
+        }
+
+        this.logger.error('Portal recovery failed after Xbox rate limit', {
+          error: getErrorMessage(recoveryError),
+        });
+      });
+    }, delayMs);
+    this.rateLimitRecoveryTimer.unref?.();
+  }
+
   private async restartPortal(): Promise<void> {
     if (this.restartPromise) {
       await this.restartPromise;
@@ -518,7 +592,24 @@ export class FriendConnectService implements AdminServiceController {
 
   private async performPortalRestart(): Promise<void> {
     await this.stop();
-    await this.start();
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await this.start();
+        return;
+      } catch (error) {
+        if (!isXboxRateLimitError(error) || attempt === 3) {
+          throw error;
+        }
+
+        const delayMs = readXboxRateLimitDelayMs(error);
+        this.logger.warn('Xbox rate limit detected during portal restart. Waiting before retrying.', {
+          attempt,
+          retryInMs: delayMs,
+        });
+        await delay(delayMs);
+      }
+    }
   }
 
   private async republishSession(): Promise<AdminActionResult> {
@@ -642,8 +733,19 @@ export class FriendConnectService implements AdminServiceController {
   private async runSessionRefreshAction(source: string, successMessage: string): Promise<AdminActionResult> {
     try {
       const data = await this.refreshSession(source);
+      this.keepaliveFailureCount = 0;
       return { ok: true, message: successMessage, data };
     } catch (error) {
+      if (isXboxRateLimitError(error)) {
+        const delayMs = readXboxRateLimitDelayMs(error);
+        this.scheduleRateLimitRecovery(source, error, delayMs);
+        return {
+          ok: false,
+          message: `Xbox is rate limiting session refreshes. The bot paused keepalives and will rebuild the session in about ${Math.ceil(delayMs / 1000)} seconds.`,
+          data: { retryInMs: delayMs, source },
+        };
+      }
+
       if (!isXboxSessionInitializationError(error)) {
         throw error;
       }
@@ -703,15 +805,27 @@ export class FriendConnectService implements AdminServiceController {
       return;
     }
 
+    const pauseRemainingMs = this.keepalivePausedUntil - Date.now();
+    if (pauseRemainingMs > 0) {
+      this.logger.debug('Session keepalive skipped while Xbox rate limit cooldown is active', { pauseRemainingMs });
+      return;
+    }
+
     this.keepaliveInFlight = true;
 
     try {
       const data = await this.refreshSession('scheduled keepalive');
+      this.keepaliveFailureCount = 0;
       this.logger.debug('Session keepalive completed', {
         currentPlayers: Number(data.currentPlayers),
         visibleMembers: Number(data.visibleMembers),
       });
     } catch (error) {
+      if (isXboxRateLimitError(error)) {
+        this.scheduleRateLimitRecovery('scheduled keepalive', error);
+        return;
+      }
+
       if (isXboxSessionInitializationError(error)) {
         await this.recoverPortal('scheduled keepalive', error).catch((recoveryError: unknown) => {
           this.logger.error('Portal recovery failed after keepalive error', { error: getErrorMessage(recoveryError) });
@@ -719,10 +833,51 @@ export class FriendConnectService implements AdminServiceController {
         return;
       }
 
+      if (isTransientNetworkError(error)) {
+        this.keepaliveFailureCount += 1;
+        this.logger.warn('Session keepalive failed with a network error', {
+          failures: this.keepaliveFailureCount,
+          recoveryAfterFailures: KEEPALIVE_FAILURES_BEFORE_RECOVERY,
+          error: getErrorMessage(error),
+        });
+
+        if (this.keepaliveFailureCount >= KEEPALIVE_FAILURES_BEFORE_RECOVERY) {
+          await this.recoverPortal('scheduled keepalive network recovery', error).catch((recoveryError: unknown) => {
+            if (isXboxRateLimitError(recoveryError)) {
+              this.scheduleRateLimitRecovery('scheduled keepalive network recovery', recoveryError);
+              return;
+            }
+
+            this.logger.error('Portal recovery failed after network keepalive errors', {
+              error: getErrorMessage(recoveryError),
+            });
+          });
+        }
+        return;
+      }
+
       this.logger.warn('Session keepalive failed', { error: getErrorMessage(error) });
     } finally {
       this.keepaliveInFlight = false;
     }
+  }
+
+  private pauseKeepaliveUntil(until: number, source: string, error: unknown): void {
+    this.keepalivePausedUntil = Math.max(this.keepalivePausedUntil, until);
+    this.logger.warn('Session keepalive paused', {
+      source,
+      pauseMs: Math.max(0, this.keepalivePausedUntil - Date.now()),
+      error: getErrorMessage(error),
+    });
+  }
+
+  private clearRateLimitRecoveryTimer(): void {
+    if (!this.rateLimitRecoveryTimer) {
+      return;
+    }
+
+    clearTimeout(this.rateLimitRecoveryTimer);
+    this.rateLimitRecoveryTimer = null;
   }
 
   private async refreshSessionActivity(portal: BedrockPortal, source: string): Promise<void> {
@@ -993,4 +1148,8 @@ function isSameConfigValue(left: unknown, right: unknown): boolean {
   }
 
   return left === right;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

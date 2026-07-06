@@ -58,5 +58,3 @@ export type SupabaseResponse<T> = {
   data: T[] | null;
   error: { message: string } | null;
 };
-
-// Made with Bob

@@ -44,7 +44,7 @@ function readStartupErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-import { FriendConnectService, isXboxSessionInitializationError, isXboxRateLimitError } from './service';
+import { FriendConnectService, isXboxSessionInitializationError, isXboxRateLimitError, readXboxRateLimitDelayMs } from './service';
 import { AdminBridge } from './admin/bridge';
 import { loadConfig, loadEnvFile } from './config';
 import { getErrorMessage, Logger } from './logger';
@@ -77,28 +77,10 @@ async function main(): Promise<void> {
         throw error;
       }
 
-      const waitSeconds = readXboxRateLimitWaitSeconds(getErrorMessage(error));
-      logger.warn('Xbox rate limit detected. Waiting before retrying startup.', { waitSeconds });
-      await delay(waitSeconds * 1000);
+      const waitMs = readXboxRateLimitDelayMs(error);
+      logger.warn('Xbox rate limit detected. Waiting before retrying startup.', { waitMs });
+      await delay(waitMs);
     }
-  }
-}
-
-function readXboxRateLimitWaitSeconds(message: string): number {
-  const fallbackSeconds = 60;
-
-  try {
-    const jsonMatch = message.match(/\{.*\}/);
-    if (!jsonMatch) {
-      return fallbackSeconds;
-    }
-
-    const details = JSON.parse(jsonMatch[0]) as { periodInSeconds?: unknown };
-    return typeof details.periodInSeconds === 'number' && Number.isFinite(details.periodInSeconds)
-      ? Math.max(fallbackSeconds, details.periodInSeconds + 10)
-      : fallbackSeconds;
-  } catch {
-    return fallbackSeconds;
   }
 }
 
@@ -156,6 +138,11 @@ process.on('unhandledRejection', (reason: unknown) => {
       .catch((error: unknown) => {
         logger.error('Portal recovery failed', { error: getErrorMessage(error) });
       });
+    return;
+  }
+
+  if (isXboxRateLimitError(reason)) {
+    service.scheduleRateLimitRecovery('unhandled Xbox rate limit', reason);
     return;
   }
 

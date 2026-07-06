@@ -57,5 +57,3 @@ export const ACTION_RATE_LIMITS: Record<string, { windowMs: number; max: number 
   run_security_diagnostics: { windowMs: 60000, max: 12 },
   unblock_xuid: { windowMs: 60000, max: 12 },
 };
-
-// Made with Bob
