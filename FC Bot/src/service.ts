@@ -29,6 +29,8 @@ const joinabilityMap: Record<RuntimeConfig['joinability'], Joinability> = {
 const SESSION_KEEPALIVE_MIN_MEMBER_COUNT = 1;
 const KEEPALIVE_FAILURES_BEFORE_RECOVERY = 2;
 const RATE_LIMIT_DELAY_BUFFER_MS = 10000;
+const TARGET_HEALTH_INTERVAL_MS = 60000;
+const TARGET_HEALTH_FAILURES_BEFORE_ALERT = 2;
 const SESSION_INITIALIZATION_ERROR_TEXT = 'member initialization requiring at least 1 members to start';
 const SESSION_STALE_ERROR_TEXT = 'session is configured for member initialization';
 
@@ -137,6 +139,10 @@ export class FriendConnectService implements AdminServiceController {
   private keepaliveFailureCount = 0;
   private keepalivePausedUntil = 0;
   private rateLimitRecoveryTimer: NodeJS.Timeout | null = null;
+  private targetHealthTimer: NodeJS.Timeout | null = null;
+  private targetHealthInFlight = false;
+  private targetHealthFailureCount = 0;
+  private targetWasReachable: boolean | null = null;
 
   constructor(
     private config: RuntimeConfig,
@@ -178,6 +184,7 @@ export class FriendConnectService implements AdminServiceController {
       await portal.start();
       this.inviteRetryQueue.start();
       this.startSessionKeepalive();
+      this.startTargetHealthMonitor();
       this.startedAt = new Date().toISOString();
       this.recordEvent({
         type: 'startup',
@@ -198,6 +205,7 @@ export class FriendConnectService implements AdminServiceController {
 
   async stop(): Promise<void> {
     this.stopSessionKeepalive();
+    this.stopTargetHealthMonitor();
     this.clearRateLimitRecoveryTimer();
 
     const portal = this.portal;
@@ -633,7 +641,6 @@ export class FriendConnectService implements AdminServiceController {
       const addressList = addresses.map((address) => address.address).join(', ');
       steps.push(`DNS: ${config.bedrockHost} resolves to ${addressList}`);
 
-      // Try a UDP Ping to see if the server is actually reachable
       const reachable = await this.pingUDP(addresses, config.bedrockPort);
       if (reachable) {
         steps.push(`Network: Successfully reached the server on port ${config.bedrockPort} (UDP).`);
@@ -721,6 +728,90 @@ export class FriendConnectService implements AdminServiceController {
     }
 
     return false;
+  }
+
+  private startTargetHealthMonitor(): void {
+    if (this.targetHealthTimer) {
+      return;
+    }
+
+    this.targetHealthTimer = setInterval(() => void this.runTargetHealthCheck(), TARGET_HEALTH_INTERVAL_MS);
+    this.targetHealthTimer.unref?.();
+    this.logger.info('Transfer target monitor started', { intervalMs: TARGET_HEALTH_INTERVAL_MS });
+
+    setTimeout(() => void this.runTargetHealthCheck(), 15000).unref?.();
+  }
+
+  private stopTargetHealthMonitor(): void {
+    if (!this.targetHealthTimer) {
+      return;
+    }
+
+    clearInterval(this.targetHealthTimer);
+    this.targetHealthTimer = null;
+    this.targetHealthInFlight = false;
+    this.logger.info('Transfer target monitor stopped');
+  }
+
+  private async runTargetHealthCheck(): Promise<void> {
+    if (this.targetHealthInFlight) {
+      return;
+    }
+
+    this.targetHealthInFlight = true;
+
+    try {
+      const reachable = await this.checkTransferTargetReachable();
+      if (reachable) {
+        if (this.targetWasReachable === false) {
+          const target = `${this.config.bedrockHost}:${this.config.bedrockPort}`;
+          this.logger.info('Transfer target recovered', { target });
+          this.recordEvent({
+            type: 'target_recovered',
+            message: 'Transfer target is responding over Bedrock UDP again.',
+            payload: { target },
+          });
+        }
+
+        this.targetHealthFailureCount = 0;
+        this.targetWasReachable = true;
+        return;
+      }
+
+      this.targetHealthFailureCount += 1;
+      if (this.targetHealthFailureCount < TARGET_HEALTH_FAILURES_BEFORE_ALERT) {
+        return;
+      }
+
+      if (this.targetWasReachable === false) {
+        return;
+      }
+
+      const target = `${this.config.bedrockHost}:${this.config.bedrockPort}`;
+      this.targetWasReachable = false;
+      this.logger.error('Transfer target is not responding over Bedrock UDP', {
+        target,
+        failures: this.targetHealthFailureCount,
+      });
+      this.recordEvent({
+        type: 'target_unreachable',
+        message: `Transfer target ${target} is not responding over Bedrock UDP. Check Geyser or the Velocity proxy.`,
+        payload: {
+          target,
+          failures: this.targetHealthFailureCount,
+        },
+      });
+    } catch (error) {
+      this.logger.warn('Transfer target monitor failed', { error: getErrorMessage(error) });
+    } finally {
+      this.targetHealthInFlight = false;
+    }
+  }
+
+  private async checkTransferTargetReachable(): Promise<boolean> {
+    const { lookup } = await import('node:dns/promises');
+    const addresses = await lookup(this.config.bedrockHost, { all: true, verbatim: false });
+    return this.pingUDP(addresses, this.config.bedrockPort);
   }
 
   private async runKeepaliveAction(): Promise<AdminActionResult> {

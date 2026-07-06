@@ -48,7 +48,9 @@ export type ServiceEventType =
   | 'session_recovered'
   | 'session_updated'
   | 'startup'
-  | 'shutdown';
+  | 'shutdown'
+  | 'target_recovered'
+  | 'target_unreachable';
 
 export type ServiceEvent = {
   type: ServiceEventType;

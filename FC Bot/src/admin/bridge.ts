@@ -168,6 +168,17 @@ export class AdminBridge implements AdminEventSink {
       });
     }
 
+    if (event.type === 'target_unreachable') {
+      await this.client.from('bot_errors').insert({
+        bot_id: this.config.botId,
+        code: 'target_unreachable',
+        message: event.message,
+        severity: 'critical',
+        fix_action: 'run_diagnostics',
+        payload: event.payload ?? {},
+      });
+    }
+
     if (event.type === 'friend_rejected') {
       await this.persistSecurityEvent('warning', 'friend_policy', event.message, {
         xuid: event.xuid ?? null,
