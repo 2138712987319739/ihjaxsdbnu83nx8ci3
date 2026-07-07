@@ -34,6 +34,7 @@ export type RuntimeConfig = {
   friendRemoveIntervalMs: number;
   inviteCooldownMs: number;
   sessionKeepaliveIntervalMs: number;
+  portalRecycleIntervalMs: number;
   logLevel: LogLevel;
   admin: AdminBridgeConfig;
 };
@@ -88,6 +89,7 @@ const defaults = {
   friendRemoveIntervalMs: '2500',
   inviteCooldownMs: '90000',
   sessionKeepaliveIntervalMs: '120000',
+  portalRecycleIntervalMs: '3300000',
   logLevel: 'info',
   adminEnabled: '',
   adminSupabaseUrl: '',
@@ -150,6 +152,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     friendRemoveIntervalMs: readInteger(env, 'FRACTURE_FRIEND_REMOVE_INTERVAL_MS', defaults.friendRemoveIntervalMs, 1000, 600000),
     inviteCooldownMs: readInteger(env, 'FRACTURE_INVITE_COOLDOWN_MS', defaults.inviteCooldownMs, 10000, 3600000),
     sessionKeepaliveIntervalMs: readKeepaliveInterval(env),
+    portalRecycleIntervalMs: readInteger(env, 'FRACTURE_PORTAL_RECYCLE_INTERVAL_MS', defaults.portalRecycleIntervalMs, 0, 7200000),
     logLevel: readLogLevel(env, 'LOG_LEVEL', defaults.logLevel),
     admin,
   };
@@ -260,6 +263,10 @@ export function normalizeRemoteConfigPatch(input: unknown): RemoteConfigPatch {
 
   if ('keepaliveIntervalMs' in input) {
     patch.sessionKeepaliveIntervalMs = readIntegerValue(input.keepaliveIntervalMs, 'keepaliveIntervalMs', 120000, 300000);
+  }
+
+  if ('portalRecycleIntervalMs' in input) {
+    patch.portalRecycleIntervalMs = readIntegerValue(input.portalRecycleIntervalMs, 'portalRecycleIntervalMs', 0, 7200000);
   }
 
   return patch;

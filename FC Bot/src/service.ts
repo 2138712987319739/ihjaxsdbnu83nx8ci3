@@ -141,6 +141,8 @@ export class FriendConnectService implements AdminServiceController {
   private keepaliveFailureCount = 0;
   private keepalivePausedUntil = 0;
   private rateLimitRecoveryTimer: NodeJS.Timeout | null = null;
+  private portalRecycleTimer: NodeJS.Timeout | null = null;
+  private portalRecycleInFlight = false;
   private targetHealthTimer: NodeJS.Timeout | null = null;
   private targetHealthInFlight = false;
   private targetHealthFailureCount = 0;
@@ -186,6 +188,7 @@ export class FriendConnectService implements AdminServiceController {
       await portal.start();
       this.inviteRetryQueue.start();
       this.startSessionKeepalive();
+      this.startPortalRecycleTimer();
       this.startTargetHealthMonitor();
       this.startedAt = new Date().toISOString();
       this.recordEvent({
@@ -207,6 +210,7 @@ export class FriendConnectService implements AdminServiceController {
 
   async stop(): Promise<void> {
     this.stopSessionKeepalive();
+    this.stopPortalRecycleTimer();
     this.stopTargetHealthMonitor();
     this.clearRateLimitRecoveryTimer();
 
@@ -619,6 +623,71 @@ export class FriendConnectService implements AdminServiceController {
         });
         await delay(delayMs);
       }
+    }
+  }
+
+  private startPortalRecycleTimer(): void {
+    if (this.portalRecycleTimer || this.config.portalRecycleIntervalMs <= 0) {
+      return;
+    }
+
+    this.portalRecycleTimer = setInterval(() => void this.runScheduledPortalRecycle(), this.config.portalRecycleIntervalMs);
+    this.portalRecycleTimer.unref?.();
+    this.logger.info('Scheduled portal recycle started', { intervalMs: this.config.portalRecycleIntervalMs });
+  }
+
+  private stopPortalRecycleTimer(): void {
+    if (!this.portalRecycleTimer) {
+      return;
+    }
+
+    clearInterval(this.portalRecycleTimer);
+    this.portalRecycleTimer = null;
+    this.portalRecycleInFlight = false;
+    this.logger.info('Scheduled portal recycle stopped');
+  }
+
+  private async runScheduledPortalRecycle(): Promise<void> {
+    if (this.portalRecycleInFlight || this.restartPromise) {
+      return;
+    }
+
+    const currentPlayers = this.portal?.getSessionMembers().size ?? 0;
+    if (currentPlayers > 0) {
+      this.logger.info('Scheduled portal recycle skipped because players are currently joining', { currentPlayers });
+      return;
+    }
+
+    this.portalRecycleInFlight = true;
+
+    try {
+      this.logger.info('Scheduled portal recycle started');
+      this.recordEvent({
+        type: 'session_recovered',
+        message: 'Scheduled portal recycle started.',
+        payload: { source: 'scheduled_portal_recycle' },
+      });
+      await this.restartPortal();
+      this.logger.info('Scheduled portal recycle completed');
+      this.recordEvent({
+        type: 'session_recovered',
+        message: 'Scheduled portal recycle completed.',
+        payload: { source: 'scheduled_portal_recycle' },
+      });
+    } catch (error) {
+      if (isXboxRateLimitError(error)) {
+        this.scheduleRateLimitRecovery('scheduled portal recycle', error);
+        return;
+      }
+
+      this.logger.error('Scheduled portal recycle failed', { error: getErrorMessage(error) });
+      this.recordEvent({
+        type: 'session_recovered',
+        message: 'Scheduled portal recycle failed.',
+        payload: { source: 'scheduled_portal_recycle', error: getErrorMessage(error) },
+      });
+    } finally {
+      this.portalRecycleInFlight = false;
     }
   }
 
