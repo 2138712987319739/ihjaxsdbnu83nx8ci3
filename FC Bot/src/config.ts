@@ -89,7 +89,7 @@ const defaults = {
   friendRemoveIntervalMs: '2500',
   inviteCooldownMs: '90000',
   sessionKeepaliveIntervalMs: '120000',
-  portalRecycleIntervalMs: '3300000',
+  portalRecycleIntervalMs: '0',
   logLevel: 'info',
   adminEnabled: '',
   adminSupabaseUrl: '',

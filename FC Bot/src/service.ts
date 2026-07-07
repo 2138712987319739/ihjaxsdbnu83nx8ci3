@@ -20,6 +20,10 @@ type InviteRetryData = {
   gamertag: string;
 };
 
+type RecentInviteTarget = InviteRetryData & {
+  lastSeenAt: number;
+};
+
 const joinabilityMap: Record<RuntimeConfig['joinability'], Joinability> = {
   inviteOnly: Joinability.InviteOnly,
   friendsOnly: Joinability.FriendsOnly,
@@ -35,6 +39,10 @@ const TARGET_HEALTH_PING_ATTEMPTS = 5;
 const TARGET_HEALTH_REQUIRED_SUCCESSES = 2;
 const SESSION_INITIALIZATION_ERROR_TEXT = 'member initialization requiring at least 1 members to start';
 const SESSION_STALE_ERROR_TEXT = 'session is configured for member initialization';
+const FRESH_SESSION_REINVITE_DELAY_MS = 5000;
+const FRESH_SESSION_REINVITE_INTERVAL_MS = 1500;
+const RECENT_INVITE_TARGET_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_FRESH_SESSION_REINVITES = 40;
 
 type SessionMemberUpdate = {
   members: {
@@ -143,6 +151,8 @@ export class FriendConnectService implements AdminServiceController {
   private rateLimitRecoveryTimer: NodeJS.Timeout | null = null;
   private portalRecycleTimer: NodeJS.Timeout | null = null;
   private portalRecycleInFlight = false;
+  private freshSessionInviteTimer: NodeJS.Timeout | null = null;
+  private recentInviteTargets = new Map<string, RecentInviteTarget>();
   private targetHealthTimer: NodeJS.Timeout | null = null;
   private targetHealthInFlight = false;
   private targetHealthFailureCount = 0;
@@ -211,6 +221,7 @@ export class FriendConnectService implements AdminServiceController {
   async stop(): Promise<void> {
     this.stopSessionKeepalive();
     this.stopPortalRecycleTimer();
+    this.clearFreshSessionInviteTimer();
     this.stopTargetHealthMonitor();
     this.clearRateLimitRecoveryTimer();
 
@@ -344,6 +355,8 @@ export class FriendConnectService implements AdminServiceController {
 
   private bindPortalEvents(portal: BedrockPortal): void {
     portal.on('sessionCreated', () => {
+      this.inviteCache.clear();
+      this.scheduleFreshSessionInvites(portal);
       this.logger.info('Bedrock session published', {
         display: 'Fracture MC',
         target: `${this.config.bedrockHost}:${this.config.bedrockPort}`,
@@ -387,7 +400,7 @@ export class FriendConnectService implements AdminServiceController {
         return;
       }
 
-      this.inviteFriend(player);
+      this.inviteFriend(player, { force: true });
     });
 
     portal.on('friendRemoved', (player: PortalPlayer) => {
@@ -435,7 +448,7 @@ export class FriendConnectService implements AdminServiceController {
    * Invite a friend to the session
    * Failed invites are automatically queued for retry
    */
-  private inviteFriend(player: PortalPlayer): void {
+  private inviteFriend(player: PortalPlayer, options: { force?: boolean } = {}): void {
     if (!this.config.autoInviteOnFriendAdded) {
       return;
     }
@@ -448,7 +461,9 @@ export class FriendConnectService implements AdminServiceController {
       return;
     }
 
-    if (!this.inviteCache.claim(xuid)) {
+    this.rememberInviteTarget(xuid, gamertag);
+
+    if (!options.force && !this.inviteCache.claim(xuid)) {
       this.logger.debug('Invite skipped due to cooldown', { xuid });
       return;
     }
@@ -492,6 +507,7 @@ export class FriendConnectService implements AdminServiceController {
       throw new Error('Portal is not running');
     }
 
+    this.rememberInviteTarget(data.xuid, data.gamertag);
     await this.portal.invitePlayer(data.xuid);
     this.logger.info('Retry invite succeeded', {
       gamertag: data.gamertag,
@@ -622,6 +638,97 @@ export class FriendConnectService implements AdminServiceController {
           retryInMs: delayMs,
         });
         await delay(delayMs);
+      }
+    }
+  }
+
+  private scheduleFreshSessionInvites(portal: BedrockPortal): void {
+    this.clearFreshSessionInviteTimer();
+
+    if (!this.config.autoInviteOnFriendAdded) {
+      return;
+    }
+
+    this.freshSessionInviteTimer = setTimeout(() => {
+      this.freshSessionInviteTimer = null;
+      void this.sendFreshSessionInvites(portal);
+    }, FRESH_SESSION_REINVITE_DELAY_MS);
+    this.freshSessionInviteTimer.unref?.();
+  }
+
+  private clearFreshSessionInviteTimer(): void {
+    if (!this.freshSessionInviteTimer) {
+      return;
+    }
+
+    clearTimeout(this.freshSessionInviteTimer);
+    this.freshSessionInviteTimer = null;
+  }
+
+  private rememberInviteTarget(xuid: string, gamertag: string): void {
+    this.recentInviteTargets.set(xuid, {
+      xuid,
+      gamertag,
+      lastSeenAt: Date.now(),
+    });
+    this.pruneRecentInviteTargets();
+  }
+
+  private pruneRecentInviteTargets(): void {
+    const expiresBefore = Date.now() - RECENT_INVITE_TARGET_TTL_MS;
+    for (const [xuid, target] of this.recentInviteTargets) {
+      if (target.lastSeenAt < expiresBefore) {
+        this.recentInviteTargets.delete(xuid);
+      }
+    }
+  }
+
+  private async sendFreshSessionInvites(portal: BedrockPortal): Promise<void> {
+    if (this.portal !== portal || !this.config.autoInviteOnFriendAdded) {
+      return;
+    }
+
+    this.pruneRecentInviteTargets();
+    const targets = [...this.recentInviteTargets.values()]
+      .sort((left, right) => right.lastSeenAt - left.lastSeenAt)
+      .slice(0, MAX_FRESH_SESSION_REINVITES);
+
+    if (!targets.length) {
+      return;
+    }
+
+    this.logger.info('Sending fresh invites for newly published session', { count: targets.length });
+
+    for (const target of targets) {
+      if (this.portal !== portal) {
+        return;
+      }
+
+      try {
+        await portal.invitePlayer(target.xuid);
+        this.logger.info('Fresh session invite sent', {
+          gamertag: target.gamertag,
+          xuid: target.xuid,
+        });
+        this.recordEvent({
+          type: 'invite_sent',
+          message: 'Fresh session invite sent.',
+          gamertag: target.gamertag,
+          xuid: target.xuid,
+          payload: { source: 'fresh_session' },
+        });
+        await delay(FRESH_SESSION_REINVITE_INTERVAL_MS);
+      } catch (error) {
+        if (isXboxRateLimitError(error)) {
+          this.scheduleRateLimitRecovery('fresh session invites', error);
+          return;
+        }
+
+        this.logger.warn('Fresh session invite failed', {
+          gamertag: target.gamertag,
+          xuid: target.xuid,
+          error: getErrorMessage(error),
+        });
       }
     }
   }
