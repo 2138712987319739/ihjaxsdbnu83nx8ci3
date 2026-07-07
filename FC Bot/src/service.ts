@@ -153,6 +153,7 @@ export class FriendConnectService implements AdminServiceController {
   private portalRecycleInFlight = false;
   private freshSessionInviteTimer: NodeJS.Timeout | null = null;
   private recentInviteTargets = new Map<string, RecentInviteTarget>();
+  private portalJoinTimes = new Map<string, number>();
   private targetHealthTimer: NodeJS.Timeout | null = null;
   private targetHealthInFlight = false;
   private targetHealthFailureCount = 0;
@@ -227,6 +228,7 @@ export class FriendConnectService implements AdminServiceController {
 
     const portal = this.portal;
     this.portal = null;
+    this.portalJoinTimes.clear();
 
     if (!portal) {
       return;
@@ -418,28 +420,42 @@ export class FriendConnectService implements AdminServiceController {
 
     portal.on('playerJoin', (player: PortalPlayer) => {
       this.totalJoins += 1;
+      const xuid = player.profile?.xuid ?? 'unknown';
+      const gamertag = player.profile?.gamertag ?? 'unknown';
+      this.portalJoinTimes.set(xuid, Date.now());
       this.logger.info('Player joined portal', {
-        gamertag: player.profile?.gamertag ?? 'unknown',
-        xuid: player.profile?.xuid ?? 'unknown',
+        gamertag,
+        xuid,
       });
       this.recordEvent({
         type: 'player_join',
         message: 'Player joined portal.',
-        gamertag: player.profile?.gamertag ?? 'unknown',
-        xuid: player.profile?.xuid ?? 'unknown',
+        gamertag,
+        xuid,
       });
     });
 
     portal.on('playerLeave', (player: PortalPlayer) => {
-      this.logger.info('Player left portal', {
-        gamertag: player.profile?.gamertag ?? 'unknown',
-        xuid: player.profile?.xuid ?? 'unknown',
+      const xuid = player.profile?.xuid ?? 'unknown';
+      const gamertag = player.profile?.gamertag ?? 'unknown';
+      const joinedAt = this.portalJoinTimes.get(xuid);
+      const portalDurationMs = joinedAt ? Date.now() - joinedAt : null;
+      this.portalJoinTimes.delete(xuid);
+      this.logger.info('Player transfer handoff completed', {
+        gamertag,
+        xuid,
+        portalDurationMs,
+        target: `${this.config.bedrockHost}:${this.config.bedrockPort}`,
       });
       this.recordEvent({
         type: 'player_leave',
-        message: 'Player left portal.',
-        gamertag: player.profile?.gamertag ?? 'unknown',
-        xuid: player.profile?.xuid ?? 'unknown',
+        message: 'Player transfer handoff completed.',
+        gamertag,
+        xuid,
+        payload: {
+          portalDurationMs,
+          target: `${this.config.bedrockHost}:${this.config.bedrockPort}`,
+        },
       });
     });
   }
