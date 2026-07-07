@@ -125,6 +125,16 @@ process.on('SIGTERM', () => {
   void shutdown('SIGTERM').finally(() => process.exit(0));
 });
 
+if (process.stdin.isTTY) {
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk: string) => {
+    const command = chunk.trim().toLowerCase();
+    if (command === 'stop' || command === 'end' || command === 'quit' || command === 'exit') {
+      void shutdown(`stdin:${command}`).finally(() => process.exit(0));
+    }
+  });
+}
+
 /**
  * Track unhandled rejections and implement circuit breaker
  * If too many occur in a short time, shut down to prevent cascading failures

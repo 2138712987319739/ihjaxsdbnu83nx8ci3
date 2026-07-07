@@ -31,6 +31,8 @@ const KEEPALIVE_FAILURES_BEFORE_RECOVERY = 2;
 const RATE_LIMIT_DELAY_BUFFER_MS = 10000;
 const TARGET_HEALTH_INTERVAL_MS = 60000;
 const TARGET_HEALTH_FAILURES_BEFORE_ALERT = 2;
+const TARGET_HEALTH_PING_ATTEMPTS = 5;
+const TARGET_HEALTH_REQUIRED_SUCCESSES = 2;
 const SESSION_INITIALIZATION_ERROR_TEXT = 'member initialization requiring at least 1 members to start';
 const SESSION_STALE_ERROR_TEXT = 'session is configured for member initialization';
 
@@ -641,11 +643,11 @@ export class FriendConnectService implements AdminServiceController {
       const addressList = addresses.map((address) => address.address).join(', ');
       steps.push(`DNS: ${config.bedrockHost} resolves to ${addressList}`);
 
-      const reachable = await this.pingUDP(addresses, config.bedrockPort);
-      if (reachable) {
-        steps.push(`Network: Successfully reached the server on port ${config.bedrockPort} (UDP).`);
+      const health = await this.pingUDPHealth(addresses, config.bedrockPort);
+      if (health.reachable) {
+        steps.push(`Network: Successfully reached the server on port ${config.bedrockPort} (UDP), ${health.successes}/${health.attempts} ping(s) answered.`);
       } else {
-        steps.push(`Network FAILED: Could not reach the server on port ${config.bedrockPort}. Check your Firewall or Geyser config.`);
+        steps.push(`Network FAILED: Could not reach the server on port ${config.bedrockPort}. Check Geyser, Velocity, or the firewall.`);
       }
     } catch {
       steps.push(`DNS FAILED: Could not resolve ${config.bedrockHost}`);
@@ -683,51 +685,64 @@ export class FriendConnectService implements AdminServiceController {
     };
   }
 
-  private async pingUDP(addresses: Array<{ address: string; family: number }>, port: number): Promise<boolean> {
+  private async pingUDPHealth(
+    addresses: Array<{ address: string; family: number }>,
+    port: number,
+    attempts = TARGET_HEALTH_PING_ATTEMPTS,
+    requiredSuccesses = TARGET_HEALTH_REQUIRED_SUCCESSES,
+  ): Promise<{ reachable: boolean; attempts: number; successes: number }> {
     const dgram = await import('node:dgram');
     const targets = addresses.length ? addresses : [{ address: this.config.bedrockHost, family: 4 }];
+    let totalAttempts = 0;
+    let successes = 0;
 
     for (const target of targets) {
-      const reachable = await new Promise<boolean>((resolve) => {
-        const socket = dgram.createSocket(target.family === 6 ? 'udp6' : 'udp4');
-        const timeout = setTimeout(() => {
-          socket.close();
-          resolve(false);
-        }, 3000);
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        totalAttempts += 1;
+        const reachable = await new Promise<boolean>((resolve) => {
+          const socket = dgram.createSocket(target.family === 6 ? 'udp6' : 'udp4');
+          const timeout = setTimeout(() => {
+            socket.close();
+            resolve(false);
+          }, 2000);
 
-        const ping = Buffer.alloc(33);
-        ping[0] = 0x01; // RakNet ID_UNCONNECTED_PING
-        ping.writeBigInt64BE(BigInt(Date.now()), 1);
-        Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex').copy(ping, 9);
-        ping.writeBigInt64BE(1n, 25);
+          const ping = Buffer.alloc(33);
+          ping[0] = 0x01;
+          ping.writeBigInt64BE(BigInt(Date.now()), 1);
+          Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex').copy(ping, 9);
+          ping.writeBigInt64BE(BigInt(Date.now() + attempt), 25);
 
-        socket.on('message', () => {
-          clearTimeout(timeout);
-          socket.close();
-          resolve(true);
-        });
+          socket.on('message', () => {
+            clearTimeout(timeout);
+            socket.close();
+            resolve(true);
+          });
 
-        socket.on('error', () => {
-          clearTimeout(timeout);
-          socket.close();
-          resolve(false);
-        });
-
-        socket.send(ping, port, target.address, (err) => {
-          if (err) {
+          socket.on('error', () => {
             clearTimeout(timeout);
             socket.close();
             resolve(false);
-          }
-        });
-      });
+          });
 
-      if (reachable) {
-        return true;
+          socket.send(ping, port, target.address, (err) => {
+            if (err) {
+              clearTimeout(timeout);
+              socket.close();
+              resolve(false);
+            }
+          });
+        });
+
+        if (reachable) {
+          successes += 1;
+          if (successes >= requiredSuccesses) {
+            return { reachable: true, attempts: totalAttempts, successes };
+          }
+        }
       }
     }
 
-    return false;
+    return { reachable: false, attempts: totalAttempts, successes };
   }
 
   private startTargetHealthMonitor(): void {
@@ -761,8 +776,8 @@ export class FriendConnectService implements AdminServiceController {
     this.targetHealthInFlight = true;
 
     try {
-      const reachable = await this.checkTransferTargetReachable();
-      if (reachable) {
+      const health = await this.checkTransferTargetReachable();
+      if (health.reachable) {
         if (this.targetWasReachable === false) {
           const target = `${this.config.bedrockHost}:${this.config.bedrockPort}`;
           this.logger.info('Transfer target recovered', { target });
@@ -792,6 +807,8 @@ export class FriendConnectService implements AdminServiceController {
       this.logger.error('Transfer target is not responding over Bedrock UDP', {
         target,
         failures: this.targetHealthFailureCount,
+        pingAttempts: health.attempts,
+        pingSuccesses: health.successes,
       });
       this.recordEvent({
         type: 'target_unreachable',
@@ -799,6 +816,8 @@ export class FriendConnectService implements AdminServiceController {
         payload: {
           target,
           failures: this.targetHealthFailureCount,
+          pingAttempts: health.attempts,
+          pingSuccesses: health.successes,
         },
       });
     } catch (error) {
@@ -808,10 +827,10 @@ export class FriendConnectService implements AdminServiceController {
     }
   }
 
-  private async checkTransferTargetReachable(): Promise<boolean> {
+  private async checkTransferTargetReachable(): Promise<{ reachable: boolean; attempts: number; successes: number }> {
     const { lookup } = await import('node:dns/promises');
     const addresses = await lookup(this.config.bedrockHost, { all: true, verbatim: false });
-    return this.pingUDP(addresses, this.config.bedrockPort);
+    return this.pingUDPHealth(addresses, this.config.bedrockPort);
   }
 
   private async runKeepaliveAction(): Promise<AdminActionResult> {
