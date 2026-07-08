@@ -35,6 +35,8 @@ export type RuntimeConfig = {
   inviteCooldownMs: number;
   sessionKeepaliveIntervalMs: number;
   portalRecycleIntervalMs: number;
+  portalHealthIntervalMs: number;
+  portalIdleRebuildIntervalMs: number;
   logLevel: LogLevel;
   admin: AdminBridgeConfig;
 };
@@ -90,6 +92,8 @@ const defaults = {
   inviteCooldownMs: '90000',
   sessionKeepaliveIntervalMs: '120000',
   portalRecycleIntervalMs: '0',
+  portalHealthIntervalMs: '60000',
+  portalIdleRebuildIntervalMs: '21600000',
   logLevel: 'info',
   adminEnabled: '',
   adminSupabaseUrl: '',
@@ -153,6 +157,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     inviteCooldownMs: readInteger(env, 'FRACTURE_INVITE_COOLDOWN_MS', defaults.inviteCooldownMs, 10000, 3600000),
     sessionKeepaliveIntervalMs: readKeepaliveInterval(env),
     portalRecycleIntervalMs: readInteger(env, 'FRACTURE_PORTAL_RECYCLE_INTERVAL_MS', defaults.portalRecycleIntervalMs, 0, 7200000),
+    portalHealthIntervalMs: readInteger(env, 'FRACTURE_PORTAL_HEALTH_INTERVAL_MS', defaults.portalHealthIntervalMs, 30000, 600000),
+    portalIdleRebuildIntervalMs: readInteger(env, 'FRACTURE_PORTAL_IDLE_REBUILD_INTERVAL_MS', defaults.portalIdleRebuildIntervalMs, 0, 86400000),
     logLevel: readLogLevel(env, 'LOG_LEVEL', defaults.logLevel),
     admin,
   };
@@ -267,6 +273,14 @@ export function normalizeRemoteConfigPatch(input: unknown): RemoteConfigPatch {
 
   if ('portalRecycleIntervalMs' in input) {
     patch.portalRecycleIntervalMs = readIntegerValue(input.portalRecycleIntervalMs, 'portalRecycleIntervalMs', 0, 7200000);
+  }
+
+  if ('portalHealthIntervalMs' in input) {
+    patch.portalHealthIntervalMs = readIntegerValue(input.portalHealthIntervalMs, 'portalHealthIntervalMs', 30000, 600000);
+  }
+
+  if ('portalIdleRebuildIntervalMs' in input) {
+    patch.portalIdleRebuildIntervalMs = readIntegerValue(input.portalIdleRebuildIntervalMs, 'portalIdleRebuildIntervalMs', 0, 86400000);
   }
 
   return patch;

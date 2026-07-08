@@ -43,6 +43,11 @@ const FRESH_SESSION_REINVITE_DELAY_MS = 5000;
 const FRESH_SESSION_REINVITE_INTERVAL_MS = 1500;
 const RECENT_INVITE_TARGET_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_FRESH_SESSION_REINVITES = 40;
+const WEBSOCKET_OPEN_STATE = 1;
+const PORTAL_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
+const PORTAL_RECOVERY_DELAY_MS = 15000;
+const PORTAL_IDLE_REBUILD_QUIET_MS = 10 * 60 * 1000;
+const PORTAL_RUNTIME_STALE_PREFIX = 'Portal runtime stale:';
 
 type SessionMemberUpdate = {
   members: {
@@ -85,6 +90,32 @@ type PortalHostRuntime = {
   rest: PortalRestRuntime;
   profile: { xuid?: string } | null;
   subscriptionId?: string;
+  rta?: unknown;
+  connectionId?: string | null;
+};
+
+type PortalSignalRuntime = {
+  ws?: { readyState?: number } | null;
+  pmsgId?: string | null;
+  credentials?: unknown;
+  on?(event: string, listener: (error: unknown) => void): unknown;
+  removeListener?(event: string, listener: (error: unknown) => void): unknown;
+};
+
+type PortalServerRuntime = {
+  signaling?: PortalSignalRuntime | null;
+  clientCount?: number;
+  clients?: Map<unknown, unknown>;
+};
+
+type PortalRuntime = BedrockPortal & {
+  server?: PortalServerRuntime;
+};
+
+type SignalListenerRegistration = {
+  signal: PortalSignalRuntime;
+  event: string;
+  listener: (error: unknown) => void;
 };
 
 export function isXboxSessionInitializationError(error: unknown): boolean {
@@ -136,6 +167,10 @@ function isRecoverableSessionActivityError(error: unknown): boolean {
     || message.includes('session not found');
 }
 
+function isPortalRuntimeStaleError(error: unknown): boolean {
+  return getErrorMessage(error).startsWith(PORTAL_RUNTIME_STALE_PREFIX);
+}
+
 export class FriendConnectService implements AdminServiceController {
   private portal: BedrockPortal | null = null;
   private inviteCache: InviteCache;
@@ -149,11 +184,20 @@ export class FriendConnectService implements AdminServiceController {
   private keepaliveFailureCount = 0;
   private keepalivePausedUntil = 0;
   private rateLimitRecoveryTimer: NodeJS.Timeout | null = null;
+  private portalRecoveryTimer: NodeJS.Timeout | null = null;
+  private portalHealthTimer: NodeJS.Timeout | null = null;
+  private portalHealthInFlight = false;
   private portalRecycleTimer: NodeJS.Timeout | null = null;
   private portalRecycleInFlight = false;
   private freshSessionInviteTimer: NodeJS.Timeout | null = null;
   private recentInviteTargets = new Map<string, RecentInviteTarget>();
   private portalJoinTimes = new Map<string, number>();
+  private signalListeners: SignalListenerRegistration[] = [];
+  private lastPortalStartedAt = 0;
+  private lastPortalJoinAt = 0;
+  private lastPortalHandoffAt = 0;
+  private lastInviteSentAt = 0;
+  private lastPortalRecoveryAt = 0;
   private targetHealthTimer: NodeJS.Timeout | null = null;
   private targetHealthInFlight = false;
   private targetHealthFailureCount = 0;
@@ -197,7 +241,10 @@ export class FriendConnectService implements AdminServiceController {
 
     try {
       await portal.start();
+      this.lastPortalStartedAt = Date.now();
+      this.bindPortalRuntimeEvents(portal);
       this.inviteRetryQueue.start();
+      this.startPortalHealthMonitor();
       this.startSessionKeepalive();
       this.startPortalRecycleTimer();
       this.startTargetHealthMonitor();
@@ -220,15 +267,19 @@ export class FriendConnectService implements AdminServiceController {
   }
 
   async stop(): Promise<void> {
+    this.stopPortalHealthMonitor();
     this.stopSessionKeepalive();
     this.stopPortalRecycleTimer();
     this.clearFreshSessionInviteTimer();
     this.stopTargetHealthMonitor();
+    this.clearPortalRecoveryTimer();
     this.clearRateLimitRecoveryTimer();
+    this.clearPortalSignalListeners();
 
     const portal = this.portal;
     this.portal = null;
     this.portalJoinTimes.clear();
+    this.lastPortalStartedAt = 0;
 
     if (!portal) {
       return;
@@ -422,6 +473,7 @@ export class FriendConnectService implements AdminServiceController {
       this.totalJoins += 1;
       const xuid = player.profile?.xuid ?? 'unknown';
       const gamertag = player.profile?.gamertag ?? 'unknown';
+      this.lastPortalJoinAt = Date.now();
       this.portalJoinTimes.set(xuid, Date.now());
       this.logger.info('Player joined portal', {
         gamertag,
@@ -440,6 +492,7 @@ export class FriendConnectService implements AdminServiceController {
       const gamertag = player.profile?.gamertag ?? 'unknown';
       const joinedAt = this.portalJoinTimes.get(xuid);
       const portalDurationMs = joinedAt ? Date.now() - joinedAt : null;
+      this.lastPortalHandoffAt = Date.now();
       this.portalJoinTimes.delete(xuid);
       this.logger.info('Player transfer handoff completed', {
         gamertag,
@@ -486,6 +539,7 @@ export class FriendConnectService implements AdminServiceController {
 
     void this.portal?.invitePlayer(xuid)
       .then(() => {
+        this.lastInviteSentAt = Date.now();
         this.logger.info('Invite sent', { gamertag, xuid });
         // Remove from retry queue if it was there
         this.inviteRetryQueue.dequeue(xuid);
@@ -525,6 +579,7 @@ export class FriendConnectService implements AdminServiceController {
 
     this.rememberInviteTarget(data.xuid, data.gamertag);
     await this.portal.invitePlayer(data.xuid);
+    this.lastInviteSentAt = Date.now();
     this.logger.info('Retry invite succeeded', {
       gamertag: data.gamertag,
       xuid: data.xuid,
@@ -564,7 +619,8 @@ export class FriendConnectService implements AdminServiceController {
 
   async recoverPortal(source: string, error?: unknown): Promise<void> {
     this.keepaliveFailureCount = 0;
-    this.logger.warn('Recovering portal after Xbox session refresh failure', {
+    this.lastPortalRecoveryAt = Date.now();
+    this.logger.warn('Recovering portal after session or signaling failure', {
       source,
       error: error ? getErrorMessage(error) : undefined,
     });
@@ -658,6 +714,265 @@ export class FriendConnectService implements AdminServiceController {
     }
   }
 
+  private bindPortalRuntimeEvents(portal: BedrockPortal): void {
+    this.clearPortalSignalListeners();
+    const signal = this.getPortalSignal(portal);
+
+    if (!signal?.on) {
+      this.logger.warn('Portal signaling runtime is not available for watchdog binding');
+      return;
+    }
+
+    const listener = (error: unknown): void => {
+      this.schedulePortalRecovery('nethernet signal event', error);
+    };
+
+    for (const event of ['connectError', 'error']) {
+      signal.on(event, listener);
+      this.signalListeners.push({ signal, event, listener });
+    }
+  }
+
+  private clearPortalSignalListeners(): void {
+    for (const { signal, event, listener } of this.signalListeners) {
+      signal.removeListener?.(event, listener);
+    }
+
+    this.signalListeners = [];
+  }
+
+  private startPortalHealthMonitor(): void {
+    if (this.portalHealthTimer) {
+      return;
+    }
+
+    this.portalHealthTimer = setInterval(() => void this.runPortalHealthCheck(), this.config.portalHealthIntervalMs);
+    this.portalHealthTimer.unref?.();
+    this.logger.info('Portal health watchdog started', { intervalMs: this.config.portalHealthIntervalMs });
+
+    setTimeout(() => void this.runPortalHealthCheck(), 30000).unref?.();
+  }
+
+  private stopPortalHealthMonitor(): void {
+    if (!this.portalHealthTimer) {
+      return;
+    }
+
+    clearInterval(this.portalHealthTimer);
+    this.portalHealthTimer = null;
+    this.portalHealthInFlight = false;
+    this.logger.info('Portal health watchdog stopped');
+  }
+
+  private clearPortalRecoveryTimer(): void {
+    if (!this.portalRecoveryTimer) {
+      return;
+    }
+
+    clearTimeout(this.portalRecoveryTimer);
+    this.portalRecoveryTimer = null;
+  }
+
+  private schedulePortalRecovery(source: string, error: unknown, delayMs = PORTAL_RECOVERY_DELAY_MS): void {
+    if (this.restartPromise) {
+      return;
+    }
+
+    if (this.portalRecoveryTimer) {
+      this.logger.debug('Portal recovery is already scheduled', { source });
+      return;
+    }
+
+    const cooldownRemainingMs = Math.max(0, PORTAL_RECOVERY_COOLDOWN_MS - (Date.now() - this.lastPortalRecoveryAt));
+    const waitMs = Math.max(delayMs, cooldownRemainingMs);
+
+    this.logger.warn('Portal recovery scheduled', {
+      source,
+      retryInMs: waitMs,
+      error: getErrorMessage(error),
+    });
+
+    this.recordEvent({
+      type: 'session_recovered',
+      message: 'Portal recovery scheduled.',
+      payload: { source, retryInMs: waitMs, error: getErrorMessage(error) },
+    });
+
+    this.portalRecoveryTimer = setTimeout(() => {
+      this.portalRecoveryTimer = null;
+      void this.recoverPortal(source, error).catch((recoveryError: unknown) => {
+        if (isXboxRateLimitError(recoveryError)) {
+          this.scheduleRateLimitRecovery(source, recoveryError);
+          return;
+        }
+
+        this.schedulePortalRecovery(source, recoveryError);
+      });
+    }, waitMs);
+    this.portalRecoveryTimer.unref?.();
+  }
+
+  private async runPortalHealthCheck(): Promise<void> {
+    if (this.portalHealthInFlight || this.restartPromise || this.portalRecoveryTimer || this.rateLimitRecoveryTimer) {
+      return;
+    }
+
+    const portal = this.portal;
+    if (!portal) {
+      this.schedulePortalRecovery('portal health watchdog', new Error('Portal is not running'));
+      return;
+    }
+
+    this.portalHealthInFlight = true;
+
+    try {
+      await this.ensurePortalSignalSessionCurrent(portal, 'portal health watchdog');
+      const issues = this.getPortalRuntimeIssues(portal);
+
+      if (issues.length) {
+        throw new Error(`${PORTAL_RUNTIME_STALE_PREFIX} ${issues.join('; ')}`);
+      }
+
+      this.runIdlePortalRebuildIfNeeded(portal);
+    } catch (error) {
+      if (isXboxRateLimitError(error)) {
+        this.scheduleRateLimitRecovery('portal health watchdog', error);
+        return;
+      }
+
+      this.schedulePortalRecovery('portal health watchdog', error);
+    } finally {
+      this.portalHealthInFlight = false;
+    }
+  }
+
+  private runIdlePortalRebuildIfNeeded(portal: BedrockPortal): void {
+    if (this.config.portalIdleRebuildIntervalMs <= 0 || !this.lastPortalStartedAt) {
+      return;
+    }
+
+    const ageMs = Date.now() - this.lastPortalStartedAt;
+    if (ageMs < this.config.portalIdleRebuildIntervalMs) {
+      return;
+    }
+
+    if (!this.isPortalQuietForRebuild(portal)) {
+      this.logger.info('Idle portal rebuild postponed because players were recently active', {
+        ageMs,
+        quietWindowMs: PORTAL_IDLE_REBUILD_QUIET_MS,
+      });
+      return;
+    }
+
+    this.schedulePortalRecovery(
+      'idle portal lifetime watchdog',
+      new Error(`Portal session age ${ageMs}ms exceeded ${this.config.portalIdleRebuildIntervalMs}ms`),
+      0,
+    );
+  }
+
+  private isPortalQuietForRebuild(portal: BedrockPortal): boolean {
+    if (portal.getSessionMembers().size > 0 || this.portalJoinTimes.size > 0) {
+      return false;
+    }
+
+    const lastActivityAt = Math.max(this.lastPortalJoinAt, this.lastPortalHandoffAt, this.lastInviteSentAt);
+    return lastActivityAt === 0 || Date.now() - lastActivityAt >= PORTAL_IDLE_REBUILD_QUIET_MS;
+  }
+
+  private async ensurePortalSignalSessionCurrent(portal: BedrockPortal, source: string): Promise<void> {
+    const signal = this.getPortalSignal(portal);
+    const currentPmsgId = signal?.pmsgId;
+
+    if (!currentPmsgId || !portal.session.pmsgId || currentPmsgId === portal.session.pmsgId) {
+      return;
+    }
+
+    await this.republishPortalSignalHandle(portal, currentPmsgId, source);
+  }
+
+  private async republishPortalSignalHandle(portal: BedrockPortal, pmsgId: string, source: string): Promise<void> {
+    this.logger.warn('Portal signaling handle changed; republishing Bedrock session route', { source });
+
+    await portal.updateSession({
+      properties: {
+        custom: {
+          WebRTCNetworkId: portal.options.webRTCNetworkId,
+          SupportedConnections: [
+            {
+              ConnectionType: 7,
+              HostIpAddress: '',
+              HostPort: 0,
+              NetherNetId: portal.options.webRTCNetworkId,
+              PmsgId: pmsgId,
+            },
+          ],
+        },
+      },
+    });
+
+    portal.session.pmsgId = pmsgId;
+    await this.refreshSessionActivity(portal, source);
+    this.recordEvent({
+      type: 'session_updated',
+      message: 'Bedrock session route republished after signaling handle change.',
+      payload: { source },
+    });
+  }
+
+  private getPortalRuntimeIssues(portal: BedrockPortal): string[] {
+    const issues: string[] = [];
+    const signal = this.getPortalSignal(portal);
+    const host = portal.host as unknown as PortalHostRuntime;
+
+    if (!portal.session.name) {
+      issues.push('session name missing');
+    }
+
+    if (!portal.session.pmsgId) {
+      issues.push('session route handle missing');
+    }
+
+    if (!host.profile?.xuid) {
+      issues.push('host profile missing');
+    }
+
+    if (!host.rta) {
+      issues.push('host RTA connection missing');
+    }
+
+    if (!host.connectionId) {
+      issues.push('host RTA connection id missing');
+    }
+
+    if (!signal) {
+      issues.push('nethernet signal missing');
+      return issues;
+    }
+
+    if (signal.ws?.readyState !== WEBSOCKET_OPEN_STATE) {
+      issues.push('nethernet signal socket is not open');
+    }
+
+    if (!signal.pmsgId) {
+      issues.push('nethernet signal route handle missing');
+    }
+
+    if (signal.pmsgId && portal.session.pmsgId && signal.pmsgId !== portal.session.pmsgId) {
+      issues.push('session route handle is stale');
+    }
+
+    if (!signal.credentials) {
+      issues.push('nethernet turn credentials missing');
+    }
+
+    return issues;
+  }
+
+  private getPortalSignal(portal: BedrockPortal): PortalSignalRuntime | null {
+    return (portal as PortalRuntime).server?.signaling ?? null;
+  }
+
   private scheduleFreshSessionInvites(portal: BedrockPortal): void {
     this.clearFreshSessionInviteTimer();
 
@@ -722,6 +1037,7 @@ export class FriendConnectService implements AdminServiceController {
 
       try {
         await portal.invitePlayer(target.xuid);
+        this.lastInviteSentAt = Date.now();
         this.logger.info('Fresh session invite sent', {
           gamertag: target.gamertag,
           xuid: target.xuid,
@@ -849,6 +1165,21 @@ export class FriendConnectService implements AdminServiceController {
       steps.push('Xbox Session: Active and visible to friends.');
       const members = this.portal.getSessionMembers();
       steps.push(`Xbox Session: ${members.size} player(s) currently in session.`);
+      try {
+        await this.ensurePortalSignalSessionCurrent(this.portal, 'admin diagnostics');
+        const runtimeIssues = this.getPortalRuntimeIssues(this.portal);
+        if (runtimeIssues.length) {
+          steps.push(`Portal Runtime FAILED: ${runtimeIssues.join('; ')}`);
+        } else {
+          steps.push('Portal Runtime: NetherNet signaling is open and the published route is current.');
+        }
+      } catch (error) {
+        steps.push(`Portal Runtime FAILED: ${getErrorMessage(error)}`);
+      }
+      steps.push(`Portal Watchdog: checks every ${Math.round(config.portalHealthIntervalMs / 1000)} seconds.`);
+      steps.push(config.portalIdleRebuildIntervalMs > 0
+        ? `Portal Watchdog: idle rebuild after ${Math.round(config.portalIdleRebuildIntervalMs / 3600000)} hour(s).`
+        : 'Portal Watchdog: idle rebuild is disabled.');
     } else {
       steps.push('Xbox Session: NOT active. Try "Republish session".');
     }
@@ -1049,6 +1380,15 @@ export class FriendConnectService implements AdminServiceController {
       }
 
       if (!isXboxSessionInitializationError(error)) {
+        if (isPortalRuntimeStaleError(error)) {
+          await this.recoverPortal(source, error);
+          return {
+            ok: true,
+            message: 'The portal runtime had gone stale, so the portal was reconnected and is ready again.',
+            data: { recovered: true, source },
+          };
+        }
+
         throw error;
       }
 
@@ -1064,6 +1404,12 @@ export class FriendConnectService implements AdminServiceController {
   private async refreshSession(source: string): Promise<Record<string, unknown>> {
     if (!this.portal) {
       throw new Error('Portal is not running');
+    }
+
+    await this.ensurePortalSignalSessionCurrent(this.portal, source);
+    const runtimeIssues = this.getPortalRuntimeIssues(this.portal);
+    if (runtimeIssues.length) {
+      throw new Error(`${PORTAL_RUNTIME_STALE_PREFIX} ${runtimeIssues.join('; ')}`);
     }
 
     const currentPlayers = this.portal.getSessionMembers().size;
@@ -1132,6 +1478,11 @@ export class FriendConnectService implements AdminServiceController {
         await this.recoverPortal('scheduled keepalive', error).catch((recoveryError: unknown) => {
           this.logger.error('Portal recovery failed after keepalive error', { error: getErrorMessage(recoveryError) });
         });
+        return;
+      }
+
+      if (isPortalRuntimeStaleError(error)) {
+        this.schedulePortalRecovery('scheduled keepalive runtime recovery', error, 0);
         return;
       }
 
